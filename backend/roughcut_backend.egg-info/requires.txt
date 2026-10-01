@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+sqlmodel
+python-multipart
+pydantic>=2
+numpy
+httpx
+
+[dev]
+pytest
+ruff

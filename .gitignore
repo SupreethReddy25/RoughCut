@@ -1,0 +1,11 @@
+data/
+tools/
+.venv/
+node_modules/
+__pycache__/
+*.sqlite
+*.pyc
+.env
+frontend/dist/
+.pytest_cache/
+.ruff_cache/

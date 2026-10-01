@@ -1,0 +1,27 @@
+[project]
+name = "roughcut-backend"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi",
+  "uvicorn[standard]",
+  "sqlmodel",
+  "python-multipart",
+  "pydantic>=2",
+  "numpy",
+  "httpx",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 110
+exclude = [".venv"]
+
+[tool.setuptools]
+packages = ["app", "sim"]
