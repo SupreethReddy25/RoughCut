@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import warnings
 from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor
 from functools import cache
@@ -170,7 +171,8 @@ def ci95(x: np.ndarray, axis: int = 0) -> tuple[np.ndarray, np.ndarray]:
     x = np.asarray(x, dtype=float)
     n = np.sum(~np.isnan(x), axis=axis)
     mean = np.nanmean(x, axis=axis)
-    with np.errstate(invalid="ignore", divide="ignore"):  # a single seed has no spread: half-width becomes nan
+    with warnings.catch_warnings(), np.errstate(invalid="ignore", divide="ignore"):
+        warnings.simplefilter("ignore", RuntimeWarning)  # a single seed has no spread: half-width becomes nan
         se = np.nanstd(x, axis=axis, ddof=1) / np.sqrt(np.maximum(n, 1))
     t = stats.t.ppf(0.975, np.maximum(n - 1, 1))
     return mean, t * se
