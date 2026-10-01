@@ -16,8 +16,12 @@ backend\.venv\Scripts\python.exe -m pytest backend
 cd backend; .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 # frontend dev server (http://localhost:5173, proxies /api to :8000)
 cd frontend; npm run dev
-# frontend typecheck / build
-cd frontend; npm run typecheck; npm run build
+# frontend typecheck / unit+component tests / build (the built app is also served by the backend at /)
+cd frontend; npm run typecheck; npm test; npm run build
+# run a throw-away backend on another port with its own data dir (does not touch data/)
+$env:ROUGHCUT_DATA_DIR="C:\tmp\rc"; cd backend; .\.venv\Scripts\python.exe -m uvicorn app.main:app --port 8001
+# regenerate the browser/Python parity fixtures (checked by backend/tests/test_frontend_fixtures.py)
+backend\.venv\Scripts\python.exe backend\scripts\make_frontend_fixtures.py
 # analysis -> data/processed/{id}/ ; rule-based EDL -> edl.json ; render -> out.mp4 + out.srt
 backend\.venv\Scripts\python.exe -m app.pipeline.run data\raw\clip_01_main.mp4 --type vlog
 backend\.venv\Scripts\python.exe -m app.edl.run clip_01_main

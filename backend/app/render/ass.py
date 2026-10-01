@@ -182,6 +182,32 @@ def _text_events(edl: EDL, text_styles: dict, positions: dict, k: float) -> list
     return events
 
 
+def caption_breaks(edl: EDL) -> list[int | None]:
+    """Where each caption line breaks into two visual lines (index of the first word of line 2, or None) -
+    computed with the SAME function and arguments the ASS export uses, so the browser preview can break identically."""
+    cap_json, _ = load_styles()
+    st = cap_json["styles"].get(edl.captions.style_id) or cap_json["styles"]["bold_pop"]
+    size_px = st["size"] * (edl.output.height / REF_H)
+    scale = st.get("active_scale", 1.1) if st["mode"] == "pop" else 1.0
+    out: list[int | None] = []
+    for line in edl.captions.lines:
+        words = [_case(_esc(w.text), st.get("case", "none")) for w in line.words]
+        out.append(wrap_index(st, words, scale, size_px) if words else None)
+    return out
+
+
+def text_breaks(edl: EDL) -> dict[str, int | None]:
+    """Same for text overlays (keyed by overlay id)."""
+    _, txt_json = load_styles()
+    k = edl.output.height / REF_H
+    out: dict[str, int | None] = {}
+    for t in edl.texts:
+        st = txt_json["styles"].get(t.style_id) or txt_json["styles"]["title"]
+        words = [_case(_esc(w), st.get("case", "none")) for w in t.text.split()]
+        out[t.id] = wrap_index(st, words, 1.0, st["size"] * k) if words else None
+    return out
+
+
 def build_ass(edl: EDL, caption_styles: dict | None = None, text_styles: dict | None = None) -> str:
     cap_json, txt_json = load_styles()
     if caption_styles is not None:

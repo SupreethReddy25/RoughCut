@@ -4,7 +4,7 @@ import subprocess
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from . import config
 from .api.routes import router
@@ -54,7 +54,26 @@ def create_app(ctx: AppContext | None = None, **ctx_kwargs) -> FastAPI:
         return {"status": "ok", "ffmpeg": _ffmpeg_status()}
 
     app.include_router(router)
+    _serve_frontend(app)
     return app
+
+
+def _serve_frontend(app: FastAPI) -> None:
+    """Serve the built single-page app (frontend/dist) from the same origin; client-side routes fall back to
+    index.html. Skipped when the frontend has not been built (development uses the Vite server)."""
+    dist = config.REPO_ROOT / "frontend" / "dist"
+    index = dist / "index.html"
+    if not index.exists():
+        return
+
+    @app.get("/{path:path}", include_in_schema=False)
+    def spa(path: str):
+        if path.startswith("api/"):
+            raise ApiError(404, "not found")
+        target = (dist / path).resolve()
+        if path and target.is_file() and dist.resolve() in target.parents:
+            return FileResponse(target)
+        return FileResponse(index)
 
 
 app = create_app()

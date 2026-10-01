@@ -8,7 +8,9 @@
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "types": ["vite/client", "vitest/globals"]
   },
   "include": ["src"]
 }

@@ -6,7 +6,7 @@ import shutil
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DATA_DIR = REPO_ROOT / "data"
+DATA_DIR = Path(os.environ["ROUGHCUT_DATA_DIR"]) if os.environ.get("ROUGHCUT_DATA_DIR") else REPO_ROOT / "data"
 RAW_DIR = DATA_DIR / "raw"
 PROCESSED_DIR = DATA_DIR / "processed"
 DB_PATH = DATA_DIR / "db.sqlite"

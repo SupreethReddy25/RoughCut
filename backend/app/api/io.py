@@ -101,6 +101,9 @@ class StateOut(BaseModel):
     changes: list[ChangeOut] = Field(default_factory=list)
     message: str | None = None
     events: list[dict] = Field(default_factory=list)  # the event rows this request created / flipped
+    # where each caption line / text overlay breaks into two visual lines: computed by the export's own wrapping code
+    caption_breaks: list[int | None] = Field(default_factory=list)
+    text_breaks: dict[str, int | None] = Field(default_factory=dict)
 
 
 class FinalizeOut(StateOut):
@@ -130,3 +133,13 @@ class ProjectOut(ProjectSummary, StateOut):
     seen_unit_ids: list[int]
     exports: dict
     job: dict | None = None
+    source: dict  # {"width", "height"} of source.mp4 (for the preview's crop maths)
+
+
+class ProfileOut(BaseModel):
+    user: UserOut
+    n_projects: int
+    n_finalized: int
+    n_learning_events: int
+    style_mixture: StyleOut | None
+    metrics: list[dict]

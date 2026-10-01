@@ -10,6 +10,7 @@ from app.appctx import Analysis, AppContext
 from app.edl.build import build_edl
 from app.models import EventRow, SuggestionRow, UnitRow, Video, vid_str
 from app.policy.log_replay import Learner
+from app.render.ass import caption_breaks, text_breaks
 from app.state import EditState, current_action, rebuild
 
 EXPLICIT = ("accept", "reject", "override")  # events that mean "the user looked at this suggestion and decided"
@@ -137,9 +138,12 @@ def build_edl_for(b: Bundle):
 
 def state_out(b: Bundle, learner: Learner | None, **extra) -> StateOut:
     ud, rd = undo_target(b), redo_target(b)
+    edl = build_edl_for(b)
+    extra.setdefault("caption_breaks", caption_breaks(edl) if edl else [])
+    extra.setdefault("text_breaks", text_breaks(edl) if edl else {})
     return StateOut(
         status=b.video.status, settings=b.state.settings(),
-        suggestions=[suggestion_out(b, s) for s in b.active], queue=queue_out(b), edl=build_edl_for(b),
+        suggestions=[suggestion_out(b, s) for s in b.active], queue=queue_out(b), edl=edl,
         style_mixture=style_out(learner), can_undo=ud is not None, can_redo=rd is not None,
         n_events=len(b.live), **extra)
 

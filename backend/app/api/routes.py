@@ -17,6 +17,7 @@ from app.api.io import (
     EventIn,
     FinalizeIn,
     FinalizeOut,
+    ProfileOut,
     ProjectOut,
     ProjectSummary,
     RenderIn,
@@ -65,6 +66,31 @@ def list_users(session: Session = Depends(get_session)) -> list[User]:
 @router.post("/users", response_model=UserOut, status_code=201)
 def create_user(body: UserIn, session: Session = Depends(get_session)) -> User:
     return pj.create_user(session, body.name)
+
+
+@router.get("/users/{user_id}/profile", response_model=ProfileOut)
+def user_profile(user_id: int, ctx: AppContext = Depends(get_ctx), session: Session = Depends(get_session)):
+    return pj.profile(ctx, session, user_id)
+
+
+# --------------------------------------------------------------------------- styles / fonts (shared with the preview)
+@router.get("/styles")
+def styles() -> dict:
+    """The caption / text style JSON the export renders from, plus the export presets: the preview reads the same."""
+    from app.render.ass import load_styles
+
+    cap, txt = load_styles()
+    return {"captions": cap, "texts": txt, "presets": pj.load_presets()}
+
+
+@router.get("/fonts/{name}")
+def font(name: str):
+    from app.render.ass import FONTS_DIR
+
+    path = FONTS_DIR / name
+    if name not in {p.name for p in FONTS_DIR.glob("*.ttf")} or not path.is_file():
+        raise ApiError(404, f"no font {name!r}")
+    return FileResponse(path, media_type="font/ttf", headers={"Cache-Control": "public, max-age=86400"})
 
 
 # --------------------------------------------------------------------------- projects

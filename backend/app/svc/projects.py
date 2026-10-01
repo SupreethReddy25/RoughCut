@@ -10,7 +10,7 @@ from pathlib import Path
 from sqlmodel import Session, select
 
 from app import config
-from app.api.io import FinalizeOut, ProjectOut, ProjectSummary
+from app.api.io import FinalizeOut, ProfileOut, ProjectOut, ProjectSummary, UserOut
 from app.appctx import AppContext
 from app.convert import event_from_row, row_from_suggestion, suggestion_from_row
 from app.models import (
@@ -23,12 +23,13 @@ from app.models import (
     WordRow,
     vid_str,
 )
+from app.pipeline.ingest import probe
 from app.policy.explain import explain
 from app.policy.reward import DEFAULT, updates_for
 from app.render.run import render as render_edl
 from app.schemas import OutputSpec
 from app.session import suggest as run_suggest
-from app.svc.bundle import ApiError, Bundle, event_dict, load_bundle, state_out
+from app.svc.bundle import ApiError, Bundle, event_dict, load_bundle, state_out, style_out
 from app.svc.events import arms_of, require_ready
 
 log = logging.getLogger(__name__)
@@ -48,6 +49,28 @@ def create_user(session: Session, name: str) -> User:
     session.add(u)
     session.commit()
     return u
+
+
+def profile(ctx: AppContext, session: Session, user_id: int) -> ProfileOut:
+    """Basic profile (PLAN 16.3 is Phase 6): what has been learned from this user so far."""
+    user = session.get(User, user_id)
+    if user is None:
+        raise ApiError(404, f"user {user_id} not found")
+    videos = {v.id: v for v in session.exec(select(Video).where(Video.user_id == user_id)).all()}
+    metrics = session.exec(select(Metric).where(Metric.user_id == user_id).order_by(Metric.video_index)).all()
+    with ctx.locks(("user", user_id)):
+        learner = ctx.policies.get(session, user_id)
+        style = style_out(learner)
+        n_learning = ctx.policies.fingerprint(session, user_id)[0]
+    return ProfileOut(
+        user=UserOut(id=user.id, name=user.name, created_at=user.created_at), n_projects=len(videos),
+        n_finalized=len(metrics), n_learning_events=n_learning, style_mixture=style,
+        metrics=[{"video_index": m.video_index, "project_id": m.video_id, "title": videos[m.video_id].title,
+                  "acceptance": m.acceptance, "n_decisions": m.n_decisions, "n_reviewed": m.n_reviewed,
+                  "n_accepted": m.n_accepted, "n_corrected": m.n_corrected, "n_manual_actions": m.n_manual_actions,
+                  "seconds_active": m.seconds_active, "duration": videos[m.video_id].duration,
+                  "manual_per_minute": m.n_manual_actions / max(videos[m.video_id].duration / 60.0, 1e-9)}
+                 for m in metrics if m.video_id in videos])
 
 
 # --------------------------------------------------------------------------- create + ingest
@@ -112,6 +135,7 @@ def _ingest(ctx: AppContext, pk: int, inputs: list[Path], video_type: str) -> No
         if not any(u.kind == "speech" for u in uf.units):
             raise RuntimeError("no speech was detected in the video: there is nothing to edit")
         _thumbnail(out)
+        src_dims = _source_dims(out)
         with ctx.session() as s:
             for model in (UnitRow, WordRow):  # a re-run (restart recovery) starts from a clean slate
                 for row in s.exec(select(model).where(model.video_id == pk)).all():
@@ -124,11 +148,26 @@ def _ingest(ctx: AppContext, pk: int, inputs: list[Path], video_type: str) -> No
                               is_filler=w.is_filler) for w in uf.words)
             s.commit()
         ctx.drop_analysis(pk)
+        with ctx.session() as s:
+            v = s.get(Video, pk)
+            v.settings_json = {**v.settings_json, "source": src_dims}
+            s.add(v)
+            s.commit()
         _set_status(ctx, pk, "ready", duration=uf.duration, source_map_json=list(uf.source_map),
                     feature_version=uf.feature_version)
     except Exception as e:
         _set_status(ctx, pk, "failed", f"{type(e).__name__}: {e}"[:500])
         raise
+
+
+def _source_dims(video_dir: Path) -> dict:
+    """Pixel size of source.mp4 (the crop maths of the browser preview needs it); 1920x1080 if there is no media."""
+    try:
+        info = probe(video_dir / "source.mp4")
+        return {"width": info.width, "height": info.height}
+    except Exception:  # best effort: a probe problem must not fail the analysis that just succeeded
+        log.warning("could not probe %s; assuming 1920x1080", video_dir / "source.mp4", exc_info=True)
+        return {"width": 1920, "height": 1080}
 
 
 def _thumbnail(video_dir: Path) -> None:
@@ -170,7 +209,8 @@ def get_project(ctx: AppContext, session: Session, pk: int) -> ProjectOut:
     data = {**summary(ctx, b.video).model_dump(), **state}
     return ProjectOut(**data, source_map=list(b.video.source_map_json), units=list(uf.units) if uf else [],
                       words=list(uf.words) if uf else [], seen_unit_ids=sorted(b.seen_units),
-                      exports=dict(b.video.settings_json.get("exports", {})), job=job.public() if job else None)
+                      exports=dict(b.video.settings_json.get("exports", {})), job=job.public() if job else None,
+                      source=dict(b.video.settings_json.get("source", {"width": 1920, "height": 1080})))
 
 
 # --------------------------------------------------------------------------- suggest
