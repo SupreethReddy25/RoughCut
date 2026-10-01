@@ -85,3 +85,26 @@ def test_render_with_speed_and_texts(processed, tmp_path):
     res = render(edl, d / "source.mp4", tmp_path / "fast.mp4", progress=lambda *_: None)
     assert abs(res["duration"] - edl.duration) <= 0.1
     assert abs(res["loudness"]["I"] + 14.0) <= 1.0
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("enhance", [True, False])
+def test_render_with_music_keeps_the_length_and_the_loudness(processed, tmp_path, enhance):
+    """PLAN 8.6: the looped music is trimmed to the output length, mixed under the voice, and (with the audio
+    enhancement on) the final mix is normalised to -14 LUFS."""
+    from app.schemas import AudioSpec, MusicSpec
+
+    d = processed("clip_01_main")
+    uf, faces, wf = load_processed(d)
+    spec = MusicSpec(track_id="lib_bright_steps", gain_db=-18, duck_db=-10)
+    edl = build_edl(uf, rule_decisions(uf, wf), faces, BuildOptions(speed=1.1, audio=AudioSpec(enhance=enhance, music=spec)))
+    track = config.REPO_ROOT / "backend" / "assets" / "music" / "bright_steps.mp3"
+    out = tmp_path / "music.mp4"
+    res = render(edl, d / "source.mp4", out, progress=lambda *_: None, music_path=track)
+    assert abs(res["duration"] - edl.duration) <= 0.1  # the track (34 s) is looped / cut to the output length
+    if enhance:
+        assert abs(res["loudness"]["I"] + 14.0) <= 1.0 and res["loudness"]["TP"] <= -1.0
+    else:
+        assert res["loudness"]["TP"] <= -0.3  # the limiter keeps the sum from clipping
+    with pytest.raises(ValueError, match="not available"):
+        render(edl, d / "source.mp4", tmp_path / "x.mp4", progress=lambda *_: None, music_path=tmp_path / "nope.mp3")

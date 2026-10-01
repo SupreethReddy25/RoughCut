@@ -1,0 +1,66 @@
+[
+  {
+    "id": "lib_sunrise",
+    "name": "Sunrise",
+    "mood": "calm",
+    "bpm": 80,
+    "file": "sunrise.mp3",
+    "duration": 48.0
+  },
+  {
+    "id": "lib_lofi_drift",
+    "name": "Lo-fi Drift",
+    "mood": "chill",
+    "bpm": 76,
+    "file": "lofi_drift.mp3",
+    "duration": 50.53
+  },
+  {
+    "id": "lib_bright_steps",
+    "name": "Bright Steps",
+    "mood": "upbeat",
+    "bpm": 112,
+    "file": "bright_steps.mp3",
+    "duration": 34.29
+  },
+  {
+    "id": "lib_neon_pulse",
+    "name": "Neon Pulse",
+    "mood": "energetic",
+    "bpm": 120,
+    "file": "neon_pulse.mp3",
+    "duration": 32.0
+  },
+  {
+    "id": "lib_quiet_hours",
+    "name": "Quiet Hours",
+    "mood": "mellow",
+    "bpm": 66,
+    "file": "quiet_hours.mp3",
+    "duration": 58.18
+  },
+  {
+    "id": "lib_coffee_break",
+    "name": "Coffee Break",
+    "mood": "light",
+    "bpm": 92,
+    "file": "coffee_break.mp3",
+    "duration": 41.74
+  },
+  {
+    "id": "lib_rise_up",
+    "name": "Rise Up",
+    "mood": "motivating",
+    "bpm": 100,
+    "file": "rise_up.mp3",
+    "duration": 38.4
+  },
+  {
+    "id": "lib_night_drive",
+    "name": "Night Drive",
+    "mood": "moody",
+    "bpm": 104,
+    "file": "night_drive.mp3",
+    "duration": 36.92
+  }
+]

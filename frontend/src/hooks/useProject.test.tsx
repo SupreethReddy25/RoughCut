@@ -28,7 +28,7 @@ function stateOf(p: ProjectOut, over: Partial<StateOut> = {}): StateOut {
   return {
     status: p.status, settings: p.settings, suggestions: p.suggestions, queue: p.queue, edl: p.edl, style_mixture: null,
     can_undo: p.can_undo, can_redo: p.can_redo, n_events: p.n_events, changes: [], message: null, events: [],
-    caption_breaks: p.caption_breaks, text_breaks: p.text_breaks, ...over,
+    caption_breaks: p.caption_breaks, text_breaks: p.text_breaks, caption_word_ids: p.caption_word_ids, ...over,
   };
 }
 

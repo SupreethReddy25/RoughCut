@@ -153,7 +153,7 @@ def test_validation_errors(proj):
     assert post_event(c, pk, "override", 409, suggestion_id=s["id"], final_action=s["current_action"])["detail"]
     assert post_event(c, pk, "reject", 422, suggestion_id=s["id"], final_action="Z115")["detail"]
     assert c.post(f"/api/projects/{pk}/events", json={"kind": "dance"}).status_code == 422
-    assert post_event(c, pk, "music", 501)["detail"]
+    assert post_event(c, pk, "music", 422, payload={"track_id": "lib_sunrise", "gain_db": 3})["detail"]  # too loud
     other = upload(c, proj.uid, ("other.mp4",))["id"]
     wait_ready(c, other)
     c.post(f"/api/projects/{other}/suggest")
@@ -349,6 +349,7 @@ def test_crop_override(proj):
 
 def test_text_overlays_add_update_delete(proj, ctx):
     c, pk = proj.client, proj.pk
+    post_event(c, pk, "text_overlay", payload={"op": "delete", "id": "hook"})  # a new project starts with a suggested title
     out = post_event(c, pk, "text_overlay", payload={"op": "add", "text": "3 mistakes", "t0": 0.0, "t1": 3.0})
     (ov,) = out["edl"]["texts"]
     assert ov["text"] == "3 mistakes" and ov["position"] == "top" and ov["style_id"] == "title" and len(ov["id"]) == 8
@@ -454,6 +455,7 @@ def test_events_mark_the_project_edited(proj):
 
 
 def test_text_overlay_table_is_synced_on_render(proj, ctx):
+    post_event(proj.client, proj.pk, "text_overlay", payload={"op": "delete", "id": "hook"})  # the suggested title
     post_event(proj.client, proj.pk, "text_overlay", payload={"op": "add", "text": "hello", "t0": 0, "t1": 2})
     from app.svc.bundle import load_bundle
     from app.svc.projects import sync_text_overlays

@@ -40,6 +40,7 @@ export function mergeState(p: ProjectOut, s: StateOut): ProjectOut {
     n_events: s.n_events,
     caption_breaks: s.caption_breaks,
     text_breaks: s.text_breaks,
+    caption_word_ids: s.caption_word_ids,
   };
 }
 

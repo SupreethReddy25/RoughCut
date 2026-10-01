@@ -8,6 +8,7 @@ import type {
   ProjectSummary,
   StateOut,
   StylesOut,
+  TrackOut,
   UserOut,
 } from "./api-types";
 
@@ -74,6 +75,14 @@ export const startRender = (id: number, preset: string) =>
 export const getJob = (jobId: string) => get<JobOut>(`/api/jobs/${jobId}`);
 export const explain = (id: number, suggestionId: number) =>
   get<ExplainOut>(`/api/projects/${id}/suggestions/${suggestionId}/explain`);
+
+export const listMusic = (userId: number) => get<TrackOut[]>(`/api/music?user_id=${userId}`);
+export const uploadMusic = (userId: number, file: File) => {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  return request<TrackOut>("POST", `/api/users/${userId}/music`, undefined, form);
+};
+export const musicUrl = (trackId: string, userId: number) => `/api/music/${encodeURIComponent(trackId)}/audio?user_id=${userId}`;
 
 export const proxyUrl = (id: number) => `/api/projects/${id}/proxy`;
 export const thumbnailUrl = (id: number) => `/api/projects/${id}/thumbnail`;

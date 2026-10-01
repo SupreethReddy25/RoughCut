@@ -16,7 +16,7 @@ from app import config
 from app.pipeline.ingest import probe
 from app.render import audio
 from app.render.ass import FONTS_DIR, build_ass
-from app.render.graph import SourceInfo, build_filter_complex
+from app.render.graph import MusicMix, SourceInfo, build_filter_complex
 from app.render.srt import build_srt
 from app.schemas import EDL
 
@@ -30,8 +30,10 @@ def _ffmpeg(args: list[str]) -> subprocess.CompletedProcess:
 
 
 def render(edl: EDL, source: str | Path, out_mp4: str | Path, out_srt: str | Path | None = None, *,
-           denoise: str = "auto", preset: str = "fast", crf: int = 20, audio_kbps: int = 192, progress=print) -> dict:
-    """Render the EDL. Returns {duration, loudness{I,LRA,TP}, denoise, loudnorm_pass1}."""
+           denoise: str = "auto", preset: str = "fast", crf: int = 20, audio_kbps: int = 192, progress=print,
+           music_path: str | Path | None = None) -> dict:
+    """Render the EDL. Returns {duration, loudness{I,LRA,TP}, denoise, loudnorm_pass1}. `music_path` is the audio file
+    of edl.audio.music (looped under the voice, ducked by it, PLAN 8.6); required when the EDL has music."""
     source, out_mp4 = Path(source), Path(out_mp4)
     info = probe(source)
     if not edl.clips:
@@ -40,6 +42,13 @@ def render(edl: EDL, source: str | Path, out_mp4: str | Path, out_srt: str | Pat
     if max(c.src_end for c in edl.clips) > src_len + 1e-3:
         raise ValueError(f"EDL clips run to {max(c.src_end for c in edl.clips):.3f}s but the source is only {src_len:.3f}s")
     src = SourceInfo(info.width, info.height)
+    mix: MusicMix | None = None
+    inputs = ["-i", str(source)]
+    if edl.audio.music is not None:
+        if music_path is None or not Path(music_path).exists():
+            raise ValueError(f"the music track {edl.audio.music.track_id!r} is not available")
+        mix = MusicMix(edl.audio.music.gain_db, edl.audio.music.duck_db, edl.duration)
+        inputs += ["-stream_loop", "-1", "-i", str(music_path)]  # looped; the graph trims it to the output length
     t0 = time.time()
     with tempfile.TemporaryDirectory(prefix="roughcut_render_") as td:
         td = Path(td)
@@ -51,6 +60,7 @@ def render(edl: EDL, source: str | Path, out_mp4: str | Path, out_srt: str | Pat
 
         enhance = edl.audio.enhance
         chain: list[str] = []
+        post: list[str] = []
         stats: dict | None = None
         use_denoise = False
         if enhance:
@@ -60,25 +70,26 @@ def render(edl: EDL, source: str | Path, out_mp4: str | Path, out_srt: str | Pat
             else:
                 use_denoise = denoise == "on"
             pre = audio.enhance_chain(use_denoise)
-            g1, _, a1 = build_filter_complex(edl, src, audio_chain=pre + [audio.loudnorm_pass1(edl.audio.target_lufs)],
-                                             video=False)
+            g1, _, a1 = build_filter_complex(edl, src, audio_chain=pre, video=False, music=mix,
+                                             post_chain=[audio.loudnorm_pass1(edl.audio.target_lufs)])
             (td / "pass1.txt").write_text(g1, encoding="utf-8")
-            p1 = _ffmpeg(["-i", str(source), "-/filter_complex", str(td / "pass1.txt"), "-map", f"[{a1}]",
-                          "-f", "null", "-"])
+            p1 = _ffmpeg([*inputs, "-/filter_complex", str(td / "pass1.txt"), "-map", f"[{a1}]", "-f", "null", "-"])
             stats = audio.parse_loudnorm_json(p1.stderr)
             progress(f"loudnorm pass 1: measured {stats['input_i']} LUFS, TP {stats['input_tp']}, "
                      f"LRA {stats['input_lra']}  (denoise={'on' if use_denoise else 'off'})")
             if audio.is_silent(stats):  # digital silence: loudnorm has nothing to measure (-inf LUFS)
                 progress("audio is silent: skipping loudness normalisation")
-                chain = pre
             else:
-                chain = pre + [audio.loudnorm_pass2(stats, edl.audio.target_lufs), "aresample=48000"]
+                post = [audio.loudnorm_pass2(stats, edl.audio.target_lufs), "aresample=48000"]
+            chain = pre
+        elif mix is not None:
+            post = ["alimiter=limit=0.95"]  # un-normalised voice + music: just keep the sum from clipping
 
         graph, vlabel, alabel = build_filter_complex(edl, src, ass_path=ass_path, fonts_dir=FONTS_DIR,
-                                                     audio_chain=chain, video=True)
+                                                     audio_chain=chain, video=True, music=mix, post_chain=post)
         (td / "graph.txt").write_text(graph, encoding="utf-8")
         out_mp4.parent.mkdir(parents=True, exist_ok=True)
-        _ffmpeg(["-i", str(source), "-/filter_complex", str(td / "graph.txt"),
+        _ffmpeg([*inputs, "-/filter_complex", str(td / "graph.txt"),
                  "-map", f"[{vlabel}]", "-map", f"[{alabel}]",
                  "-c:v", "libx264", "-preset", preset, "-crf", str(crf), "-profile:v", "high", "-pix_fmt", "yuv420p",
                  "-r", str(edl.output.fps), "-c:a", "aac", "-b:a", f"{audio_kbps}k", "-ar", "48000",
@@ -101,6 +112,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--srt", default=None, help="output srt (default: same name as the mp4)")
     ap.add_argument("--denoise", default="auto", choices=["auto", "on", "off"])
     ap.add_argument("--preset", default="fast", help="x264 preset")
+    ap.add_argument("--music", default=None, help="audio file for edl.audio.music (looped under the voice)")
     a = ap.parse_args(argv)
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -110,7 +122,7 @@ def main(argv: list[str] | None = None) -> None:
     out = Path(a.out) if a.out else edl_path.with_name("out.mp4")
     srt = Path(a.srt) if a.srt else out.with_suffix(".srt")
     try:
-        render(edl, source, out, srt, denoise=a.denoise, preset=a.preset)
+        render(edl, source, out, srt, denoise=a.denoise, preset=a.preset, music_path=a.music)
     except (ValueError, RuntimeError) as e:
         raise SystemExit(f"render failed: {e}") from None
 

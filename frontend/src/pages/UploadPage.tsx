@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { createProject } from "../api";
 import { useUser } from "../hooks/useUser";
-import { moveItem, parseTarget, validateFiles } from "../lib/upload";
+import { BATCH_MAX, moveItem, parseTarget, validateFiles } from "../lib/upload";
 import type { VideoType } from "../types";
 
 const TYPES: { id: VideoType; label: string; hint: string }[] = [
@@ -19,11 +19,14 @@ export default function UploadPage() {
   const nav = useNavigate();
   const input = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<File[]>([]);
+  const [batch, setBatch] = useState(false);
   const [type, setType] = useState<VideoType>("other");
   const [target, setTarget] = useState("");
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [uploaded, setUploaded] = useState(0);
 
   const addFiles = (list: FileList | null) => {
     if (!list || list.length === 0) return;
@@ -32,44 +35,89 @@ export default function UploadPage() {
     if (input.current) input.current.value = ""; // so choosing the same file again fires change
   };
 
+  const form = (fs: File[], autopilot: boolean, name: string, t: number | null) => {
+    const f = new FormData();
+    f.append("user_id", String(user!.id));
+    f.append("type", type);
+    f.append("title", name);
+    if (t !== null) f.append("target", String(t));
+    if (autopilot) f.append("autopilot", "true");
+    for (const file of fs) f.append("files", file, file.name); // in the order shown: that is the order they are joined in
+    return f;
+  };
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (busy || !user) return;
-    const problem = validateFiles(files);
+    const problem = validateFiles(files, batch ? BATCH_MAX : undefined);
     const t = parseTarget(target);
     if (problem || "error" in t) {
       setError(problem ?? ("error" in t ? t.error : null));
       return;
     }
-    const form = new FormData();
-    form.append("user_id", String(user.id));
-    form.append("type", type);
-    form.append("title", title.trim());
-    if (t.value !== null) form.append("target", String(t.value));
-    for (const f of files) form.append("files", f, f.name); // in the order shown: that is the order they are joined in
     setBusy(true);
     setError(null);
-    try {
-      const p = await createProject(form);
-      nav(`/projects/${p.id}`);
-    } catch (err) {
-      setError((err as Error).message);
-      setBusy(false);
+    setUploaded(0);
+    if (!batch) {
+      try {
+        const p = await createProject(form(files, false, title.trim(), t.value));
+        nav(`/projects/${p.id}`);
+      } catch (err) {
+        setError((err as Error).message);
+        setBusy(false);
+      }
+      return;
     }
+    // batch: every file is its own video, edited automatically with what the agent has learned about the user
+    const failed: { file: File; reason: string }[] = [];
+    let ok = 0;
+    for (const [i, file] of files.entries()) {
+      setProgress(`Uploading ${i + 1} of ${files.length}: ${file.name}`);
+      try {
+        await createProject(form([file], true, "", t.value));
+        ok++;
+      } catch (err) {
+        failed.push({ file, reason: (err as Error).message });
+      }
+    }
+    setProgress(null);
+    setBusy(false);
+    if (failed.length === 0) return nav("/");
+    setUploaded((n) => n + ok);
+    setFiles(failed.map((f) => f.file)); // what is left to retry
+    setError(`${ok} of ${files.length} uploaded. ${failed.map((f) => `${f.file.name}: ${f.reason}`).join(" ")}`);
   };
 
   return (
     <form onSubmit={submit} className="mx-auto max-w-2xl space-y-5 p-6" aria-label="New project">
       <div className="flex items-center">
-        <h1 className="text-2xl font-semibold">New project</h1>
+        <h1 className="text-2xl font-semibold">{batch ? "Batch upload" : "New project"}</h1>
         <Link to="/" className="ml-auto text-sm text-sky-400 hover:underline">
-          Cancel
+          {uploaded > 0 ? "Go to projects" : "Cancel"}
         </Link>
       </div>
 
+      <fieldset>
+        <legend className="mb-1 text-sm font-medium text-neutral-300">What are you uploading?</legend>
+        <div className="grid grid-cols-2 gap-2">
+          {[
+            { id: false, label: "One video", hint: "several takes are joined in order" },
+            { id: true, label: `Batch (up to ${BATCH_MAX})`, hint: "each file is edited automatically; you review or post" },
+          ].map((m) => (
+            <label key={String(m.id)} className={`cursor-pointer rounded-lg border px-3 py-2 text-sm ${batch === m.id ? "border-sky-400 bg-sky-500/10" : "border-white/15 hover:bg-white/5"}`}>
+              <input type="radio" name="mode" className="sr-only" checked={batch === m.id} onChange={() => setBatch(m.id)} />
+              <div className="font-medium">{m.label}</div>
+              <div className="text-xs text-neutral-400">{m.hint}</div>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+
       <section>
         <h2 className="mb-1 text-sm font-medium text-neutral-300">Video clips</h2>
-        <p className="mb-2 text-xs text-neutral-500">Several takes are joined in the order shown (3 minutes in total at most).</p>
+        <p className="mb-2 text-xs text-neutral-500">
+          {batch ? `Up to ${BATCH_MAX} videos, 3 minutes each.` : "Several takes are joined in the order shown (3 minutes in total at most)."}
+        </p>
         <input ref={input} type="file" accept="video/*,.mkv,.mov" multiple className="hidden" aria-label="Choose video files" onChange={(e) => addFiles(e.target.files)} />
         <button type="button" onClick={() => input.current?.click()} className="w-full rounded-lg border border-dashed border-white/25 p-5 text-sm text-neutral-300 hover:bg-white/5">
           {files.length === 0 ? "Choose video files…" : "Add more files…"}
@@ -83,12 +131,16 @@ export default function UploadPage() {
                   {f.name}
                 </span>
                 <span className="text-xs text-neutral-500">{mb(f.size)}</span>
-                <button type="button" aria-label={`Move ${f.name} up`} disabled={i === 0} onClick={() => setFiles((l) => moveItem(l, i, -1))} className="rounded px-1.5 hover:bg-white/10 disabled:opacity-30">
-                  ↑
-                </button>
-                <button type="button" aria-label={`Move ${f.name} down`} disabled={i === files.length - 1} onClick={() => setFiles((l) => moveItem(l, i, 1))} className="rounded px-1.5 hover:bg-white/10 disabled:opacity-30">
-                  ↓
-                </button>
+                {!batch && (
+                  <>
+                    <button type="button" aria-label={`Move ${f.name} up`} disabled={i === 0} onClick={() => setFiles((l) => moveItem(l, i, -1))} className="rounded px-1.5 hover:bg-white/10 disabled:opacity-30">
+                      ↑
+                    </button>
+                    <button type="button" aria-label={`Move ${f.name} down`} disabled={i === files.length - 1} onClick={() => setFiles((l) => moveItem(l, i, 1))} className="rounded px-1.5 hover:bg-white/10 disabled:opacity-30">
+                      ↓
+                    </button>
+                  </>
+                )}
                 <button type="button" aria-label={`Remove ${f.name}`} onClick={() => setFiles((l) => l.filter((_, k) => k !== i))} className="rounded px-1.5 text-rose-300 hover:bg-white/10">
                   ×
                 </button>
@@ -116,10 +168,12 @@ export default function UploadPage() {
           <span className="mb-1 block font-medium text-neutral-300">Target length (seconds, optional)</span>
           <input value={target} onChange={(e) => setTarget(e.target.value)} inputMode="numeric" placeholder="e.g. 30" className="w-full rounded bg-neutral-800 px-2 py-1.5" />
         </label>
-        <label className="block text-sm">
-          <span className="mb-1 block font-medium text-neutral-300">Title (optional)</span>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} placeholder="defaults to the file name" className="w-full rounded bg-neutral-800 px-2 py-1.5" />
-        </label>
+        {!batch && (
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium text-neutral-300">Title (optional)</span>
+            <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} placeholder="defaults to the file name" className="w-full rounded bg-neutral-800 px-2 py-1.5" />
+          </label>
+        )}
       </div>
 
       {error && (
@@ -127,8 +181,13 @@ export default function UploadPage() {
           {error}
         </p>
       )}
+      {progress && (
+        <p role="status" className="text-sm text-neutral-300">
+          {progress}
+        </p>
+      )}
       <button type="submit" disabled={busy || files.length === 0} className="w-full rounded bg-sky-600 py-2 font-medium text-white hover:bg-sky-500 disabled:opacity-50">
-        {busy ? "Uploading…" : "Upload and analyse"}
+        {busy ? "Uploading…" : batch ? "Upload and auto-edit" : "Upload and analyse"}
       </button>
     </form>
   );

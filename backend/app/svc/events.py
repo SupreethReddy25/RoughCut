@@ -14,10 +14,11 @@ import uuid
 
 from sqlmodel import Session
 
+from app import music as music_lib
 from app.api.io import EventIn, ManualEditIn, StateOut
 from app.appctx import AppContext
 from app.convert import event_from_row, suggestion_from_row
-from app.models import EventRow, SuggestionRow
+from app.models import EventRow, SuggestionRow, User
 from app.policy import context
 from app.policy.reward import (
     BINARY,
@@ -31,7 +32,14 @@ from app.policy.reward import (
     updates_for,
 )
 from app.schemas import TextOverlay
-from app.state import NEUTRAL, mapping_to_payload, validate_setting, validate_speed
+from app.state import (
+    DEFAULT_KEYS,
+    NEUTRAL,
+    mapping_to_payload,
+    validate_music,
+    validate_setting,
+    validate_speed,
+)
 from app.svc.bundle import (
     EXPLICIT,
     ApiError,
@@ -279,6 +287,36 @@ def _setting(b: Bundle, body: EventIn) -> list[EventRow]:
     return [_event(b, "setting", None, {"key": key, "value": value})]
 
 
+def _music(ctx: AppContext, b: Bundle, body: EventIn) -> list[EventRow]:
+    p = body.payload
+    try:
+        spec = validate_music(p) if p.get("track_id") else None
+    except ValueError as e:
+        raise ApiError(422, str(e)) from None
+    if spec is not None and music_lib.track_path(ctx.data_dir, b.video.user_id, spec["track_id"]) is None:
+        raise ApiError(404, f"no music track {spec['track_id']!r}")
+    cur = b.state.music.model_dump() if b.state.music else None
+    if spec == cur:
+        return []
+    return [_event(b, "music", None, {"music": spec})]
+
+
+def _remember_defaults(session: Session, b: Bundle, events: list[EventRow]) -> None:
+    """Settings, speed and music the user picks become the starting point of their next projects (PLAN 8.2 / 8.10)."""
+    upd: dict = {}
+    for e in events:
+        if e.kind == "setting" and e.payload_json["key"] in DEFAULT_KEYS:
+            upd[e.payload_json["key"]] = e.payload_json["value"]
+        elif e.kind == "speed":
+            upd["speed"] = e.payload_json["value"]
+        elif e.kind == "music":
+            upd["music"] = e.payload_json["music"]
+    user = session.get(User, b.video.user_id) if upd else None
+    if user is not None:
+        user.defaults_json = {**user.defaults_json, **upd}
+        session.add(user)
+
+
 BUILDERS = {"accept": _explicit, "reject": _explicit, "override": _explicit, "manual": _manual, "nudge": _nudge,
             "crop": _crop, "caption_text": _caption_text, "text_overlay": _text_overlay, "speed": _speed,
             "setting": _setting}
@@ -289,8 +327,6 @@ def handle_event(ctx: AppContext, session: Session, video_pk: int, body: EventIn
     with ctx.locks(("video", video_pk)):
         b = load_bundle(ctx, session, video_pk)
         require_ready(b)
-        if body.kind == "music":
-            raise ApiError(501, "background music arrives in a later phase")
         uid = b.video.user_id
         with ctx.locks(("user", uid)):
             try:
@@ -308,7 +344,7 @@ def handle_event(ctx: AppContext, session: Session, video_pk: int, body: EventIn
 
 def _handle(ctx: AppContext, session: Session, b: Bundle, body: EventIn) -> StateOut:
     uid, pk = b.video.user_id, b.video.id
-    events = BUILDERS[body.kind](b, body)
+    events = _music(ctx, b, body) if body.kind == "music" else BUILDERS[body.kind](b, body)
     if not events:
         learner = ctx.policies.get(session, uid)
         return state_out(b, learner, message="No change: the edit already looks like that.")
@@ -328,6 +364,7 @@ def _handle(ctx: AppContext, session: Session, b: Bundle, body: EventIn) -> Stat
     learner = ctx.policies.get(session, uid)
     for e in events:
         session.add(e)
+    _remember_defaults(session, b, events)
     session.flush()
     for e in events:
         if e.kind in LEARNED_KINDS:
@@ -350,6 +387,8 @@ def _handle(ctx: AppContext, session: Session, b: Bundle, body: EventIn) -> Stat
     b3 = load_bundle(ctx, session, pk) if changes else b2
     msg = f"Adjusted {len(changes)} suggestion{'s' if len(changes) != 1 else ''} based on your last change" \
         if changes else None
+    if body.kind == "nudge" and not changes:
+        msg = "That nudge changed nothing: the untouched suggestions already lean that way."
     return state_out(b3, learner, changes=changes, message=msg, events=[event_dict(e) for e in events])
 
 

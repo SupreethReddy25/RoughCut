@@ -104,6 +104,8 @@ class StateOut(BaseModel):
     # where each caption line / text overlay breaks into two visual lines: computed by the export's own wrapping code
     caption_breaks: list[int | None] = Field(default_factory=list)
     text_breaks: dict[str, int | None] = Field(default_factory=dict)
+    # source word ids of every caption line (the browser maps a clicked caption word to the word it emphasises)
+    caption_word_ids: list[list[int]] = Field(default_factory=list)
 
 
 class FinalizeOut(StateOut):
@@ -124,6 +126,11 @@ class ProjectSummary(BaseModel):
     created_at: float
     updated_at: float
     has_thumbnail: bool = False
+    # autopilot (PLAN 8.8): "ready" = can be posted as it is, "review" = needs a look (n_review uncertain decisions)
+    autopilot: bool = False
+    badge: Literal["ready", "review"] | None = None
+    n_review: int = 0
+    expected_corrections: float | None = None
 
 
 class ProjectOut(ProjectSummary, StateOut):
@@ -143,3 +150,13 @@ class ProfileOut(BaseModel):
     n_learning_events: int
     style_mixture: StyleOut | None
     metrics: list[dict]
+    trust: float | None = None  # explicit-acceptance rate of the last 2 reviewed videos (PLAN 8.8); None = not enough yet
+    trust_threshold: float = 0.85
+
+
+class TrackOut(BaseModel):
+    id: str
+    name: str
+    mood: str = ""
+    duration: float
+    source: Literal["library", "upload"]

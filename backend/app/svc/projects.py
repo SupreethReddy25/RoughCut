@@ -10,6 +10,7 @@ from pathlib import Path
 from sqlmodel import Session, select
 
 from app import config
+from app import music as music_lib
 from app.api.io import FinalizeOut, ProfileOut, ProjectOut, ProjectSummary, UserOut
 from app.appctx import AppContext
 from app.convert import event_from_row, row_from_suggestion, suggestion_from_row
@@ -29,7 +30,8 @@ from app.policy.reward import DEFAULT, updates_for
 from app.render.run import render as render_edl
 from app.schemas import OutputSpec
 from app.session import suggest as run_suggest
-from app.svc.bundle import ApiError, Bundle, event_dict, load_bundle, state_out, style_out
+from app.state import sanitize_defaults
+from app.svc.bundle import ApiError, Bundle, event_dict, load_bundle, queue_out, state_out, style_out
 from app.svc.events import arms_of, require_ready
 
 log = logging.getLogger(__name__)
@@ -51,6 +53,21 @@ def create_user(session: Session, name: str) -> User:
     return u
 
 
+TRUST_WINDOW = 2  # finalized, reviewed videos the trust score looks at
+TRUST_READY = 0.85  # trust needed for a batch video to be called "Ready to post"
+READY_MAX_CORRECTIONS = 3.0  # ... together with fewer expected corrections than this
+
+
+def trust_score(session: Session, user_id: int) -> float | None:
+    """PLAN 8.8: how often the user accepted what was suggested, over their last 2 finalized videos (the reviewed
+    suggestions only: a video that was exported without a review says nothing about it). None until one exists."""
+    rows = session.exec(select(Metric).where(Metric.user_id == user_id, Metric.n_reviewed > 0,
+                                             Metric.exported_via_autopilot == False)
+                        .order_by(Metric.video_index.desc()).limit(TRUST_WINDOW)).all()  # type: ignore[attr-defined]
+    reviewed = sum(m.n_reviewed for m in rows)
+    return sum(m.n_accepted for m in rows) / reviewed if reviewed else None
+
+
 def profile(ctx: AppContext, session: Session, user_id: int) -> ProfileOut:
     """Basic profile (PLAN 16.3 is Phase 6): what has been learned from this user so far."""
     user = session.get(User, user_id)
@@ -65,6 +82,7 @@ def profile(ctx: AppContext, session: Session, user_id: int) -> ProfileOut:
     return ProfileOut(
         user=UserOut(id=user.id, name=user.name, created_at=user.created_at), n_projects=len(videos),
         n_finalized=len(metrics), n_learning_events=n_learning, style_mixture=style,
+        trust=trust_score(session, user_id), trust_threshold=TRUST_READY,
         metrics=[{"video_index": m.video_index, "project_id": m.video_id, "title": videos[m.video_id].title,
                   "acceptance": m.acceptance, "n_decisions": m.n_decisions, "n_reviewed": m.n_reviewed,
                   "n_accepted": m.n_accepted, "n_corrected": m.n_corrected, "n_manual_actions": m.n_manual_actions,
@@ -74,10 +92,19 @@ def profile(ctx: AppContext, session: Session, user_id: int) -> ProfileOut:
 
 
 # --------------------------------------------------------------------------- create + ingest
+BATCH_MAX = 5  # autopilot videos that may wait for / be in analysis at once (PLAN 8.8)
+
+
 def create_project(ctx: AppContext, session: Session, user_id: int, inputs: list[Path], names: list[str],
-                   video_type: str, target: float | None, title: str) -> Video:
-    if session.get(User, user_id) is None:
+                   video_type: str, target: float | None, title: str, autopilot: bool = False) -> Video:
+    user = session.get(User, user_id)
+    if user is None:
         raise ApiError(404, f"user {user_id} not found")
+    if autopilot:
+        waiting = session.exec(select(Video).where(Video.user_id == user_id, Video.autopilot == True,
+                                                   Video.status.in_(("uploaded", "processing")))).all()  # type: ignore[attr-defined]
+        if len(waiting) >= BATCH_MAX:
+            raise ApiError(429, f"at most {BATCH_MAX} batch videos can be waiting at once: wait for one to finish")
     if not inputs:
         raise ApiError(422, "at least one video file is required")
     if video_type not in VIDEO_TYPES:
@@ -85,7 +112,8 @@ def create_project(ctx: AppContext, session: Session, user_id: int, inputs: list
     if target is not None and not 5 <= target <= 180:
         raise ApiError(422, "target duration must be between 5 and 180 seconds")
     v = Video(user_id=user_id, title=(title.strip() or names[0]), sources_json=[str(p) for p in inputs],
-              video_type=video_type, target_duration=target, status="uploaded")
+              video_type=video_type, target_duration=target, status="uploaded", autopilot=autopilot,
+              settings_json={"defaults": sanitize_defaults(user.defaults_json)})  # the user's remembered settings
     session.add(v)
     session.commit()
     pk = v.id
@@ -155,19 +183,35 @@ def _ingest(ctx: AppContext, pk: int, inputs: list[Path], video_type: str) -> No
             s.commit()
         _set_status(ctx, pk, "ready", duration=uf.duration, source_map_json=list(uf.source_map),
                     feature_version=uf.feature_version)
+        _autopilot_suggest(ctx, pk)
     except Exception as e:
         _set_status(ctx, pk, "failed", f"{type(e).__name__}: {e}"[:500])
         raise
 
 
+def _autopilot_suggest(ctx: AppContext, pk: int) -> None:
+    """A batch (autopilot) video is auto-edited as soon as it is analysed (PLAN 8.8). A failure here must not fail the
+    analysis: the suggestions are then simply made when the project is opened."""
+    try:
+        with ctx.session() as s:
+            if s.get(Video, pk).autopilot:
+                suggest(ctx, s, pk)
+    except Exception:
+        log.warning("autopilot suggestions for project %s failed; they will be made when it is opened", pk, exc_info=True)
+
+
 def _source_dims(video_dir: Path) -> dict:
     """Pixel size of source.mp4 (the crop maths of the browser preview needs it); 1920x1080 if there is no media."""
+    default = {"width": 1920, "height": 1080}
+    source = video_dir / "source.mp4"
+    if not source.exists():
+        return default
     try:
-        info = probe(video_dir / "source.mp4")
+        info = probe(source)
         return {"width": info.width, "height": info.height}
     except Exception:  # best effort: a probe problem must not fail the analysis that just succeeded
-        log.warning("could not probe %s; assuming 1920x1080", video_dir / "source.mp4", exc_info=True)
-        return {"width": 1920, "height": 1080}
+        log.warning("could not probe %s; assuming 1920x1080", source, exc_info=True)
+        return default
 
 
 def _thumbnail(video_dir: Path) -> None:
@@ -184,11 +228,28 @@ def _thumbnail(video_dir: Path) -> None:
 
 
 # --------------------------------------------------------------------------- list / get
-def summary(ctx: AppContext, v: Video) -> ProjectSummary:
+def summary(ctx: AppContext, v: Video, auto: dict | None = None) -> ProjectSummary:
     return ProjectSummary(id=v.id, video_id=vid_str(v.id), user_id=v.user_id, title=v.title, status=v.status,
                           error=v.error, duration=v.duration, video_type=v.video_type,
                           target_duration=v.target_duration, created_at=v.created_at, updated_at=v.updated_at,
-                          has_thumbnail=(ctx.video_dir(v.id) / "thumb.jpg").exists())
+                          has_thumbnail=(ctx.video_dir(v.id) / "thumb.jpg").exists(), autopilot=v.autopilot,
+                          **(auto or {}))
+
+
+def autopilot_badge(ctx: AppContext, session: Session, v: Video, trust: float | None) -> dict:
+    """PLAN 8.8: a batch video that nobody has touched yet is "ready" to post when the agent expects fewer than 3
+    corrections (sum of 1 - confidence over what is still pending) AND the user trusts it (trust >= 0.85); otherwise it
+    "needs review" (n_review = the uncertain decisions the editor opens on)."""
+    if not v.autopilot or v.status != "ready":
+        return {}
+    b = load_bundle(ctx, session, v.id)
+    pending = [s for s in b.active if b.status_of(s) == "pending"]
+    if not pending:
+        return {}
+    expected = sum(1.0 - s.confidence for s in pending)
+    ready = expected < READY_MAX_CORRECTIONS and trust is not None and trust >= TRUST_READY
+    return {"badge": "ready" if ready else "review", "n_review": len(queue_out(b).needs_review),
+            "expected_corrections": round(expected, 2)}
 
 
 def list_projects(ctx: AppContext, session: Session, user_id: int) -> list[ProjectSummary]:
@@ -196,7 +257,8 @@ def list_projects(ctx: AppContext, session: Session, user_id: int) -> list[Proje
         raise ApiError(404, f"user {user_id} not found")
     rows = session.exec(select(Video).where(Video.user_id == user_id).order_by(Video.updated_at.desc(),  # type: ignore[attr-defined]
                                                                                Video.id.desc())).all()  # type: ignore[attr-defined]
-    return [summary(ctx, v) for v in rows]
+    trust = trust_score(session, user_id)
+    return [summary(ctx, v, autopilot_badge(ctx, session, v, trust)) for v in rows]
 
 
 def get_project(ctx: AppContext, session: Session, pk: int) -> ProjectOut:
@@ -206,7 +268,8 @@ def get_project(ctx: AppContext, session: Session, pk: int) -> ProjectOut:
         state = state_out(b, learner).model_dump()
     job = ctx.jobs.get(b.video.settings_json.get("ingest_job", ""))
     uf = b.analysis.uf if b.analysis is not None else None
-    data = {**summary(ctx, b.video).model_dump(), **state}
+    auto = autopilot_badge(ctx, session, b.video, trust_score(session, b.video.user_id))
+    data = {**summary(ctx, b.video, auto).model_dump(), **state}
     return ProjectOut(**data, source_map=list(b.video.source_map_json), units=list(uf.units) if uf else [],
                       words=list(uf.words) if uf else [], seen_unit_ids=sorted(b.seen_units),
                       exports=dict(b.video.settings_json.get("exports", {})), job=job.public() if job else None,
@@ -223,7 +286,9 @@ def suggest(ctx: AppContext, session: Session, pk: int):
             learner = ctx.policies.get(session, uid)
             if b.sug_rows:  # idempotent: the suggestions of a video are made once
                 return state_out(b, learner, message="Suggestions already exist.")
-            res = run_suggest(b.analysis.uf, b.analysis.word_feats, learner.policy, video_type=b.video.video_type)
+            auto = b.video.autopilot
+            res = run_suggest(b.analysis.uf, b.analysis.word_feats, learner.policy, video_type=b.video.video_type,
+                              source="autopilot" if auto else "policy", greedy=auto)
             rows = [row_from_suggestion(s, pk, mean_best=mb) for s, mb in zip(res.suggestions, res.mean_best, strict=True)]
             session.add_all(rows)
             session.flush()
@@ -376,6 +441,12 @@ def start_render(ctx: AppContext, session: Session, pk: int, preset: str) -> dic
         edl = build_edl(b.analysis.uf, b.state.decisions, b.analysis.faces, opts)
         if not edl.clips:
             raise ApiError(409, "nothing is kept in this edit, so there is nothing to render")
+        music_path = None
+        if edl.audio.music is not None:
+            music_path = music_lib.track_path(ctx.data_dir, b.video.user_id, edl.audio.music.track_id)
+            if music_path is None:
+                raise ApiError(409, f"the music track {edl.audio.music.track_id!r} is not available any more: "
+                                    "choose another track or remove the music")
         last_event = max((e.id for e in b.live), default=0)
         sync_text_overlays(session, b)
         warn = edl.duration > pr["max_duration_s"]
@@ -386,7 +457,7 @@ def start_render(ctx: AppContext, session: Session, pk: int, preset: str) -> dic
             out_dir.mkdir(parents=True, exist_ok=True)
             with ctx.locks(("render", pk, preset)):  # two renders of one preset must not write the same files
                 res = render_edl(edl, source, out_dir / f"{preset}.mp4", out_dir / f"{preset}.srt", crf=pr["crf"],
-                                 audio_kbps=pr["audio_kbps"], progress=lambda *_: None)
+                                 audio_kbps=pr["audio_kbps"], progress=lambda *_: None, music_path=music_path)
             info = {"event_id": last_event, "duration": res["duration"], "loudness": res["loudness"]["I"],
                     "ts": time.time(), "over_platform_limit": warn}
             with ctx.session() as s:

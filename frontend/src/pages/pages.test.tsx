@@ -130,7 +130,7 @@ describe("Projects page", () => {
     expect(await screen.findByText(/No projects yet/)).toBeInTheDocument();
     unmount();
 
-    const base = { video_id: "v_1", user_id: 1, error: null, duration: 12, video_type: "vlog", target_duration: null, created_at: 0, updated_at: 0, has_thumbnail: false } as const;
+    const base = { video_id: "v_1", user_id: 1, error: null, duration: 12, video_type: "vlog", target_duration: null, created_at: 0, updated_at: 0, has_thumbnail: false, autopilot: false, badge: null, n_review: 0, expected_corrections: null } as const;
     mocked.listProjects.mockResolvedValueOnce([
       { ...base, id: 1, title: "First", status: "ready" },
       { ...base, id: 2, title: "Second", status: "failed", error: "no speech found" },
@@ -158,7 +158,7 @@ const styles: StylesOut = {
 const stateOf = (p = makeProject(), over: Partial<StateOut> = {}): StateOut => ({
   status: p.status, settings: p.settings, suggestions: p.suggestions, queue: p.queue, edl: p.edl, style_mixture: null,
   can_undo: p.can_undo, can_redo: p.can_redo, n_events: p.n_events, changes: [], message: null, events: [],
-  caption_breaks: [], text_breaks: {}, ...over,
+  caption_breaks: [], text_breaks: {}, caption_word_ids: [], ...over,
 });
 
 async function openEditor(project = makeProject()) {

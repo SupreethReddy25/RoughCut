@@ -36,3 +36,9 @@ backend\.venv\Scripts\python.exe scripts\make_test_clips.py
 - App factory `app.main:create_app` (context = DB + jobs + per-user policies, built at startup); data under `data/` (db.sqlite, processed/, uploads/, exports/, policies/).
 - Shipped priors live in `backend/assets/priors` (rebuild: `python backend/scripts/build_prototypes.py`). Product bandit settings (lambda, style sigma) are in `app/appctx.py`.
 - The event log is the source of truth: edit state, EDL and policy are recomputed from it (`app/state.py`, `app/policy/log_replay.py`).
+
+## Product features (Phase 5)
+- Background music: bundled loops in `backend/assets/music` are synthesised (CC0), rebuild with `backend\.venv\Scripts\python.exe backend\scripts\make_music.py`; uploads live in `data/music/u<user>/`. The mix (loop, 1 s fades, sidechain ducking, loudnorm on the mix) is in `app/render/graph.py`; the browser approximates it in `MusicPreview`.
+- A new project starts from the user's remembered settings (`User.defaults_json` copied into `Video.settings_json["defaults"]`; they are a starting point, not events) and from a suggested title (overlay id `hook`, deleted/edited with normal text-overlay events).
+- Batch / autopilot videos (`Video.autopilot`): greedy suggestions (`source = "autopilot"`), badge = "ready" when sum(1 - confidence) < 3 and trust >= 0.85 (`svc/projects.py`). One-click export skips finalize on purpose: nothing was reviewed, so nothing is learned.
+- One nudge click moves at most a quarter of each decision type (`svc/rescore.py`).

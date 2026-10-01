@@ -21,6 +21,52 @@ class SourceInfo:
     height: int
 
 
+MUSIC_FADE = 1.0  # seconds of fade in at the start and fade out at the end of the music (PLAN 8.6)
+DUCK_REF_DB = -19.0  # level of loud speech at the sidechain, dBFS: the voice the requested depth is calibrated for
+DUCK_ATTACK_MS = 20
+DUCK_RELEASE_MS = 300
+
+
+@dataclass
+class MusicMix:
+    """Background music under the voice. The music file is input 1 of the ffmpeg command, looped (-stream_loop -1)."""
+
+    gain_db: float
+    duck_db: float
+    duration: float  # output duration to fill
+
+
+def duck_ratio(duck_db: float) -> float:
+    """Compressor ratio for a requested duck depth: 8 (PLAN 8.6) at -10 dB, gentler / harder either side."""
+    return max(1.5, min(20.0, round(abs(duck_db) * 0.8, 2)))
+
+
+def duck_threshold(duck_db: float) -> float:
+    """Sidechain threshold (linear) that makes the compressor take `duck_db` dB off the music when the voice is at
+    DUCK_REF_DB: gain reduction = (voice level - threshold) * (1 - 1/ratio). At the default -10 dB this is the PLAN's
+    0.03; a quieter voice is ducked a little less, a louder one a little more."""
+    r = duck_ratio(duck_db)
+    return round(10 ** ((DUCK_REF_DB - abs(duck_db) / (1 - 1 / r)) / 20), 4)
+
+
+def music_chain(mix: MusicMix) -> list[str]:
+    """Filter-graph lines that turn input 1 + the voice [vox] into the mix [mix]."""
+    d = max(mix.duration, 0.1)
+    fade = min(MUSIC_FADE, d / 2)
+    lines = ["[vox]aformat=channel_layouts=stereo,asplit=2[vkey][vmix]",
+             (f"[1:a]aformat=channel_layouts=stereo,aresample=48000,atrim=0:{d:.4f},asetpts=PTS-STARTPTS,"
+             f"volume={mix.gain_db:.1f}dB,afade=t=in:st=0:d={fade:.3f},afade=t=out:st={d - fade:.4f}:d={fade:.3f}[mus]")]
+    if mix.duck_db < 0:
+        lines.append(f"[mus][vkey]sidechaincompress=threshold={duck_threshold(mix.duck_db)}:ratio={duck_ratio(mix.duck_db)}:"
+                     f"attack={DUCK_ATTACK_MS}:release={DUCK_RELEASE_MS}[musd]")
+        music = "musd"
+    else:
+        lines.append("[vkey]anullsink")
+        music = "mus"
+    lines.append(f"[vmix][{music}]amix=inputs=2:duration=first:normalize=0[mix]")
+    return lines
+
+
 def _even(x: float, lo: int = 2) -> int:
     return max(lo, round(x / 2.0) * 2)
 
@@ -47,9 +93,12 @@ def fpath(p: str | Path) -> str:
 
 def build_filter_complex(edl: EDL, src: SourceInfo, *, ass_path: str | Path | None = None,
                          fonts_dir: str | Path | None = None, audio_chain: list[str] | None = None,
-                         video: bool = True) -> tuple[str, str | None, str]:
+                         video: bool = True, music: MusicMix | None = None,
+                         post_chain: list[str] | None = None) -> tuple[str, str | None, str]:
     """Returns (graph, video_label|None, audio_label). `audio_chain` filters are appended after the speed step
-    (it normally ends with a loudnorm). video=False builds the audio-only graph used for loudnorm pass 1."""
+    (the voice chain); with `music` the voice and the music are then mixed and `post_chain` (normally the loudnorm)
+    runs on the mix. Without music `post_chain` simply continues the chain, as before. video=False builds the
+    audio-only graph used for loudnorm pass 1."""
     if not edl.clips:
         raise ValueError("EDL has no clips")
     ow, oh, fps, speed = edl.output.width, edl.output.height, edl.output.fps, edl.output.speed
@@ -83,5 +132,11 @@ def build_filter_complex(edl: EDL, src: SourceInfo, *, ass_path: str | Path | No
     if abs(speed - 1.0) > 1e-9:
         achain.append(f"atempo={speed:.6f}")
     achain += audio_chain or []
-    parts.append("[ac]" + (",".join(achain) if achain else "anull") + "[ao]")
+    if music is None:
+        achain += post_chain or []
+        parts.append("[ac]" + (",".join(achain) if achain else "anull") + "[ao]")
+    else:
+        parts.append("[ac]" + (",".join(achain) if achain else "anull") + "[vox]")
+        parts += music_chain(music)
+        parts.append("[mix]" + (",".join(post_chain) if post_chain else "anull") + "[ao]")
     return ";\n".join(parts), vlabel, "ao"

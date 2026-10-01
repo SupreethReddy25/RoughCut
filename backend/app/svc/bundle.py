@@ -7,7 +7,7 @@ from sqlmodel import Session, select
 
 from app.api.io import QueueOut, StateOut, StyleOut, SuggestionOut
 from app.appctx import Analysis, AppContext
-from app.edl.build import build_edl
+from app.edl.build import build_edl_with_lines
 from app.models import EventRow, SuggestionRow, UnitRow, Video, vid_str
 from app.policy.log_replay import Learner
 from app.render.ass import caption_breaks, text_breaks
@@ -82,7 +82,7 @@ def load_bundle(ctx: AppContext, session: Session, video_pk: int) -> Bundle:
         elif e.kind == "implicit" and e.suggestion_id is not None:
             b.implicit_for.add(e.suggestion_id)
     if b.analysis is not None:
-        b.state = rebuild(b.analysis.uf, b.active, b.live)
+        b.state = rebuild(b.analysis.uf, b.active, b.live, video.settings_json.get("defaults"))
     return b
 
 
@@ -131,14 +131,16 @@ def style_out(learner: Learner | None) -> StyleOut | None:
 
 
 def build_edl_for(b: Bundle):
+    """(EDL, word ids of each caption line) of the current edit, or (None, [])."""
     if b.analysis is None:
-        return None
-    return build_edl(b.analysis.uf, b.state.decisions, b.analysis.faces, b.state.build_options())
+        return None, []
+    return build_edl_with_lines(b.analysis.uf, b.state.decisions, b.analysis.faces, b.state.build_options())
 
 
 def state_out(b: Bundle, learner: Learner | None, **extra) -> StateOut:
     ud, rd = undo_target(b), redo_target(b)
-    edl = build_edl_for(b)
+    edl, line_ids = build_edl_for(b)
+    extra.setdefault("caption_word_ids", line_ids)
     extra.setdefault("caption_breaks", caption_breaks(edl) if edl else [])
     extra.setdefault("text_breaks", text_breaks(edl) if edl else {})
     return StateOut(

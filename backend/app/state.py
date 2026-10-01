@@ -11,11 +11,18 @@ from dataclasses import asdict, dataclass, field
 from app.edl.build import BuildOptions, Decisions
 from app.policy.reward import Mapping, apply_mapping
 from app.render.ass import load_styles
-from app.schemas import AudioSpec, OutputSpec, TextOverlay, UnitsFile
+from app.schemas import AudioSpec, MusicSpec, OutputSpec, TextOverlay, UnitsFile
 
 SPEEDS = (1.0, 1.1, 1.15, 1.25)
 CAPTION_POSITIONS = ("lower_third", "center", "top")
 NEUTRAL = {"pause": "KEEP", "zoom": "NONE", "emphasis": "NONE"}  # what "reject without an alternative" leaves
+GAIN_RANGE = (-40.0, -6.0)  # background music level under the voice, dB
+DUCK_RANGE = (-24.0, 0.0)  # how far the music dips while the voice speaks, dB (0 = no ducking)
+HOOK_ID = "hook"  # the suggested title (PLAN 8.7); a normal overlay once it is in the state
+HOOK_MAX_WORDS = 8
+HOOK_SECONDS = 3.0
+# the settings a user's earlier choices carry over to a new project (PLAN 8.2 / 8.6 / 8.10 "remembered default")
+DEFAULT_KEYS = ("speed", "caption_style", "caption_position", "captions_enabled", "audio_enhance", "music")
 
 
 @dataclass
@@ -26,6 +33,7 @@ class EditState:
     caption_position: str = "lower_third"
     captions_enabled: bool = True
     audio_enhance: bool = True
+    music: MusicSpec | None = None
     texts: dict[str, TextOverlay] = field(default_factory=dict)
     nudges: list[dict] = field(default_factory=list)  # active nudge events, oldest first
 
@@ -36,7 +44,7 @@ class EditState:
     def build_options(self, output: OutputSpec | None = None, target_lufs: float = -14.0) -> BuildOptions:
         return BuildOptions(speed=self.speed, captions_enabled=self.captions_enabled, caption_style=self.caption_style,
                             caption_position=self.caption_position, texts=list(self.texts.values()),
-                            audio=AudioSpec(enhance=self.audio_enhance, target_lufs=target_lufs),
+                            audio=AudioSpec(enhance=self.audio_enhance, target_lufs=target_lufs, music=self.music),
                             output=output or OutputSpec())
 
 
@@ -63,6 +71,58 @@ def validate_setting(key: str, value) -> object:
             raise ValueError(f"{key} must be true or false")
         return value
     raise ValueError(f"unknown setting {key!r}")
+
+
+def validate_music(value) -> dict | None:
+    """The normalised payload of a `music` event: None (no music) or {track_id, gain_db, duck_db}; ValueError if bad."""
+    if value is None:
+        return None
+    if not isinstance(value, dict) or not isinstance(value.get("track_id"), str) or not value["track_id"]:
+        raise ValueError("music needs a track_id (or null to remove the music)")
+    out = {"track_id": value["track_id"]}
+    for key, (lo, hi), default in (("gain_db", GAIN_RANGE, -18.0), ("duck_db", DUCK_RANGE, -10.0)):
+        raw = value.get(key, default)
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not lo <= float(raw) <= hi:
+            raise ValueError(f"{key} must be a number from {lo:g} to {hi:g}")
+        out[key] = round(float(raw), 1)
+    return out
+
+
+def sanitize_defaults(d: dict | None) -> dict:
+    """The part of a stored defaults dict that is still valid (a style may have been renamed since it was saved)."""
+    out: dict = {}
+    for key, val in (d or {}).items():
+        if key not in DEFAULT_KEYS:
+            continue
+        try:
+            if key == "speed":
+                out[key] = validate_speed(val)
+            elif key == "music":
+                out[key] = validate_music(val)
+            else:
+                out[key] = validate_setting(key, val)
+        except ValueError:
+            continue
+    return out
+
+
+def hook_overlay(uf: UnitsFile) -> TextOverlay | None:
+    """The suggested title (PLAN 8.7): the first sentence of the talk, at most 8 words, shown for the first 3 s."""
+    first = next((u for u in uf.units if u.kind == "speech"), None)
+    if first is None:
+        return None
+    start = min((w.idx for w in uf.words if w.unit_id == first.id), default=None)
+    if start is None:
+        return None
+    words: list[str] = []
+    for w in sorted((w for w in uf.words if w.idx >= start), key=lambda w: w.idx):  # across phrases: a sentence
+        words.append(w.text_display.strip())
+        if len(words) >= HOOK_MAX_WORDS or words[-1].endswith((".", "?", "!", "…")):
+            break
+    text = " ".join(x for x in words if x).rstrip(",;:.!?…- ").strip()
+    if not text:
+        return None
+    return TextOverlay(id=HOOK_ID, text=text, t0=0.0, t1=HOOK_SECONDS, position="top", style_id="title")
 
 
 def validate_speed(value) -> float:
@@ -98,6 +158,8 @@ def apply_event(st: EditState, kind: str, payload: dict, uf: UnitsFile) -> None:
         st.speed = float(payload["value"])
     elif kind == "setting":
         setattr(st, payload["key"], payload["value"])
+    elif kind == "music":
+        st.music = MusicSpec(**payload["music"]) if payload.get("music") else None
     elif kind == "caption_text":
         st.decisions.caption_text[int(payload["word_id"])] = payload["text"]
     elif kind == "crop":
@@ -114,9 +176,20 @@ def apply_event(st: EditState, kind: str, payload: dict, uf: UnitsFile) -> None:
     # accept / implicit / (other kinds): no effect on the edit
 
 
-def rebuild(uf: UnitsFile, active_suggestions: list, events: list) -> EditState:
-    """`events` = non-undone events in log order; `active_suggestions` = rows that are not superseded."""
+def rebuild(uf: UnitsFile, active_suggestions: list, events: list, defaults: dict | None = None) -> EditState:
+    """`events` = non-undone events in log order; `active_suggestions` = rows that are not superseded.
+    `defaults` = the user's remembered settings, as they were when the project was created: the starting point
+    the events then change. A new project also starts with the suggested title (a deletion of it is an event)."""
     st = EditState(decisions=base_decisions(active_suggestions))
+    d = sanitize_defaults(defaults)
+    for key in ("speed", "caption_style", "caption_position", "captions_enabled", "audio_enhance"):
+        if key in d:
+            setattr(st, key, d[key])
+    if d.get("music"):
+        st.music = MusicSpec(**d["music"])
+    hook = hook_overlay(uf)
+    if hook is not None:
+        st.texts[hook.id] = hook
     for ev in events:
         apply_event(st, ev.kind, ev.payload_json, uf)
     return st

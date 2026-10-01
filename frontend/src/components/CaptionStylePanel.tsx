@@ -150,7 +150,10 @@ function OverlayRow({
     setT0(String(t.t0));
     setT1(String(t.t1));
   }, [t.text, t.t0, t.t1]);
+  const [y, setY] = useState<number | null>(t.y);
+  useEffect(() => setY(t.y), [t.y]);
   const commit = (patch: Record<string, unknown>) => onOverlay({ op: "update", id: t.id, ...patch });
+  const commitY = () => y !== null && y !== t.y && commit({ y });
   const commitText = () => text.trim() && text !== t.text && commit({ text: text.trim() });
   const commitTimes = () => {
     const a = Number(t0);
@@ -164,6 +167,7 @@ function OverlayRow({
   };
   return (
     <li className={`rounded-lg border p-2 ${selected ? "border-amber-300 bg-amber-400/10" : "border-white/10"}`} data-testid={`overlay-${t.id}`}>
+      {t.id === "hook" && <p className="mb-1 text-[10px] uppercase tracking-wide text-amber-300">Suggested title: edit it or delete it</p>}
       <div className="flex gap-1">
         <input
           aria-label="Overlay text"
@@ -201,6 +205,23 @@ function OverlayRow({
           ))}
         </select>
       </div>
+      {t.position === "custom" && (
+        <label className="mt-1 flex items-center gap-2 text-[11px] text-neutral-400">
+          Height
+          <input
+            type="range"
+            aria-label="Height"
+            min={5}
+            max={95}
+            value={Math.round((y ?? 0.5) * 100)}
+            onChange={(e) => setY(Number(e.target.value) / 100)}
+            onPointerUp={commitY}
+            onKeyUp={commitY}
+            className="flex-1"
+          />
+          <span className="w-8 text-right tabular-nums">{Math.round((y ?? 0.5) * 100)}%</span>
+        </label>
+      )}
     </li>
   );
 }

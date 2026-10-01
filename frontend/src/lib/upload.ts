@@ -1,6 +1,7 @@
 // Pure helpers of the upload form (PLAN 16.2: multi-file with reorder, type, target length).
 export const VIDEO_EXTS = [".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"];
 export const MAX_TOTAL_BYTES = 500 * 1024 * 1024;
+export const BATCH_MAX = 5; // videos in one batch upload (PLAN 8.8)
 export const TARGET_MIN = 5;
 export const TARGET_MAX = 180;
 
@@ -26,8 +27,9 @@ export function parseTarget(raw: string): { value: number | null } | { error: st
 }
 
 /** The reason the file list cannot be uploaded, or null. */
-export function validateFiles(files: { name: string; size: number }[]): string | null {
+export function validateFiles(files: { name: string; size: number }[], maxFiles?: number): string | null {
   if (files.length === 0) return "Choose at least one video file.";
+  if (maxFiles !== undefined && files.length > maxFiles) return `A batch can have at most ${maxFiles} videos.`;
   const bad = files.find((f) => !isVideoName(f.name));
   if (bad) return `"${bad.name}" is not a supported video file (${VIDEO_EXTS.join(", ")}).`;
   if (files.some((f) => f.size === 0)) return "One of the files is empty.";

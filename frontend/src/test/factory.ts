@@ -45,6 +45,7 @@ export function makeProject(over: Partial<ProjectOut> = {}): ProjectOut {
   return {
     id: 7, video_id: "v_7", user_id: 1, title: "Test", status: "ready", error: null, duration: 4, video_type: "other",
     target_duration: null, created_at: 0, updated_at: 0, has_thumbnail: false,
+    autopilot: false, badge: null, n_review: 0, expected_corrections: null,
     settings: { speed: 1, caption_style: "bold_pop", caption_position: "lower_third", captions_enabled: true, audio_enhance: true },
     suggestions, queue: { needs_review: [1, 2], confident: [3] },
     edl: {
@@ -53,7 +54,7 @@ export function makeProject(over: Partial<ProjectOut> = {}): ProjectOut {
       audio: { enhance: true, target_lufs: -14, music: null }, duration: 3,
     },
     style_mixture: null, can_undo: false, can_redo: false, n_events: 0, changes: [], message: null, events: [],
-    caption_breaks: [], text_breaks: {}, source_map: [], units, words, seen_unit_ids: [], exports: {}, job: null,
+    caption_breaks: [], text_breaks: {}, caption_word_ids: [[0, 1], [2, 3], [4, 5]], source_map: [], units, words, seen_unit_ids: [], exports: {}, job: null,
     source: { width: 1920, height: 1080 },
     ...over,
   };

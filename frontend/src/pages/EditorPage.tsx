@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import type { ManualEditIn, ProjectOut, SuggestionOut } from "../api-types";
+import { CaptionStrip } from "../components/CaptionStrip";
 import { CaptionStylePanel } from "../components/CaptionStylePanel";
 import { ExportDialog } from "../components/ExportDialog";
+import { MusicPanel } from "../components/MusicPanel";
+import { MusicPreview } from "../components/MusicPreview";
 import { PreviewPlayer, type PlayerHandle, type TimeInfo } from "../components/PreviewPlayer";
 import { ReviewPanel, WhyBox } from "../components/ReviewPanel";
 import { Timeline } from "../components/Timeline";
@@ -10,6 +13,7 @@ import { TranscriptEditor, type Sel, type TranscriptHandle } from "../components
 import { useActiveSeconds } from "../hooks/useActiveSeconds";
 import { useProject, type ProjectApi } from "../hooks/useProject";
 import { useFonts, useStyles } from "../hooks/useStyles";
+import { useUser } from "../hooks/useUser";
 import { acceptEvent, chooseEvent, keyOf, nextInQueue, rejectEvent, sameKey } from "../lib/decide";
 import { actionsFor, targetStart } from "../lib/describe";
 import { fmtTime } from "../lib/format";
@@ -96,7 +100,10 @@ function Workspace({ api, project }: { api: ProjectApi; project: Ready }) {
   const [time, setTime] = useState<TimeInfo>({ src: 0, out: 0, playing: false, clip: 0 });
   const [sel, setSel] = useState<Sel | null>(null);
   const [selText, setSelText] = useState<string | null>(null);
-  const [tab, setTab] = useState<"review" | "style">("review");
+  const { user } = useUser();
+  const [params, setParams] = useSearchParams();
+  const onlyUncertain = params.get("review") === "1"; // opened from a batch video's "Needs review" badge
+  const [tab, setTab] = useState<"review" | "style" | "music">("review");
   const [showSafe, setShowSafe] = useState(false);
   const [reframe, setReframe] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -122,6 +129,12 @@ function Workspace({ api, project }: { api: ProjectApi; project: Ready }) {
   const onSetting = useCallback((key: string, value: unknown) => void send({ kind: "setting", payload: { key, value } }), [send]);
   const onSpeed = useCallback((value: number) => void send({ kind: "speed", payload: { value } }), [send]);
   const onOverlay = useCallback((payload: Record<string, unknown>) => void send({ kind: "text_overlay", payload }), [send]);
+  const onMusic = useCallback((payload: Record<string, unknown>) => void send({ kind: "music", payload }), [send]);
+  const onNudge = useCallback((name: string) => void send({ kind: "nudge", payload: { name, magnitude: 2 } }), [send]);
+  const onOverlayChange = useCallback(
+    (id: string, t0: number, t1: number) => void send({ kind: "text_overlay", payload: { op: "update", id, t0, t1 } }),
+    [send],
+  );
   const onCrop = useCallback((unit_id: number, x: number, y: number) => void send({ kind: "crop", payload: { unit_id, x, y } }), [send]);
   const onSeekOut = useCallback((o: number) => player.current?.seekOut(o), []);
   const onSeekSrc = useCallback((t: number) => player.current?.seekSrc(t), []);
@@ -261,7 +274,7 @@ function Workspace({ api, project }: { api: ProjectApi; project: Ready }) {
       )}
 
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(220px,300px)_minmax(0,1fr)_minmax(280px,340px)]">
-        <div className="flex min-h-0 flex-col items-center gap-2 border-r border-white/10 p-3">
+        <div className="flex min-h-0 flex-col items-center gap-2 overflow-y-auto border-r border-white/10 p-3">
           <div className="relative min-h-0 w-full flex-1">
             <PreviewPlayer
               ref={player}
@@ -279,6 +292,8 @@ function Workspace({ api, project }: { api: ProjectApi; project: Ready }) {
             {time.playing ? "Pause" : "Play"} <kbd className="text-[10px] opacity-60">Space</kbd>
           </button>
           {!fontsReady && <p className="text-[10px] text-neutral-500">Loading caption fonts…</p>}
+          <CaptionStrip project={project} outTime={time.out} onEdit={onEdit} />
+          {user && <MusicPreview edl={project.edl} userId={user.id} time={time} />}
         </div>
 
         <div className="min-h-0 overflow-y-auto">
@@ -297,7 +312,7 @@ function Workspace({ api, project }: { api: ProjectApi; project: Ready }) {
 
         <div className="flex min-h-0 flex-col border-l border-white/10">
           <div className="flex border-b border-white/10 text-sm" role="tablist">
-            {(["review", "style"] as const).map((t) => (
+            {(["review", "style", "music"] as const).map((t) => (
               <button
                 key={t}
                 type="button"
@@ -306,7 +321,7 @@ function Workspace({ api, project }: { api: ProjectApi; project: Ready }) {
                 onClick={() => setTab(t)}
                 className={`flex-1 px-3 py-1.5 ${tab === t ? "border-b-2 border-sky-400 text-white" : "text-neutral-400 hover:text-neutral-200"}`}
               >
-                {t === "review" ? "Review" : "Style"}
+                {t === "review" ? "Review" : t === "style" ? "Style" : "Music"}
               </button>
             ))}
           </div>
@@ -316,6 +331,9 @@ function Workspace({ api, project }: { api: ProjectApi; project: Ready }) {
                 project={project}
                 selected={sel}
                 fresh={api.fresh}
+                onNudge={onNudge}
+                onlyUncertain={onlyUncertain}
+                onShowAll={() => setParams({}, { replace: true })}
                 onSelect={select}
                 onAccept={(s) => {
                   const ev = acceptEvent(s);
@@ -330,6 +348,8 @@ function Workspace({ api, project }: { api: ProjectApi; project: Ready }) {
                   if (ev) void api.send(ev);
                 }}
               />
+            ) : tab === "music" ? (
+              <div className="h-full overflow-y-auto p-3">{user && <MusicPanel edl={project.edl} userId={user.id} onMusic={onMusic} />}</div>
             ) : (
               <CaptionStylePanel
                 project={project}
@@ -359,6 +379,7 @@ function Workspace({ api, project }: { api: ProjectApi; project: Ready }) {
           setSelText(t);
           if (t) setTab("style");
         }}
+        onOverlayChange={onOverlayChange}
       />
 
       {exporting && (

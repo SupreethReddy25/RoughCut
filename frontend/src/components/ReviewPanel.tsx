@@ -15,7 +15,19 @@ interface Props {
   onAccept: (s: SuggestionOut) => void;
   onReject: (s: SuggestionOut) => void;
   onChoose: (s: SuggestionOut, action: string) => void;
+  /** a global nudge ("snappier", "calmer", "more_zooms", "fewer_zooms"); omit to hide the buttons */
+  onNudge?: (name: string) => void;
+  /** show only "Needs your eye" (a batch video opened from its "Needs review" badge) */
+  onlyUncertain?: boolean;
+  onShowAll?: () => void;
 }
+
+export const NUDGES: { name: string; label: string; hint: string }[] = [
+  { name: "snappier", label: "Snappier", hint: "Cut more: tighter pauses, more cut phrases and fillers (for this video)" },
+  { name: "calmer", label: "Calmer", hint: "Keep more of the pauses and phrases (for this video)" },
+  { name: "more_zooms", label: "More zooms", hint: "Punch in more often (for this video)" },
+  { name: "fewer_zooms", label: "Fewer zooms", hint: "Fewer punch-ins (for this video)" },
+];
 
 
 interface RowProps extends Pick<Props, "selected" | "fresh" | "onSelect" | "onAccept" | "onReject" | "onChoose"> {
@@ -94,7 +106,7 @@ function QueueRow({ s, selected, fresh, onSelect, onAccept, onReject, onChoose, 
  * The review queue (PLAN 7.3): "Needs your eye" = confidence below 70 %, least confident first; the confident rest is
  * collapsed ("spot-check"); decided items are listed below. Live re-scoring re-sorts it after every feedback.
  */
-export function ReviewPanel({ project, selected, fresh, onSelect, onAccept, onReject, onChoose }: Props) {
+export function ReviewPanel({ project, selected, fresh, onSelect, onAccept, onReject, onChoose, onNudge, onlyUncertain, onShowAll }: Props) {
   const byId = useMemo(() => new Map(project.suggestions.map((s) => [s.id, s])), [project.suggestions]);
   const units = useMemo(() => new Map(project.units.map((u) => [u.id, u])), [project.units]);
   const words = useMemo(() => new Map(project.words.map((w) => [w.id, w])), [project.words]);
@@ -106,6 +118,24 @@ export function ReviewPanel({ project, selected, fresh, onSelect, onAccept, onRe
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="review-panel">
+      {onNudge && (
+        <div className="flex flex-wrap items-center gap-1 border-b border-white/10 px-3 py-2 text-xs" role="group" aria-label="Nudge the whole edit">
+          <span className="mr-1 text-neutral-500">Nudge all:</span>
+          {NUDGES.map((n) => (
+            <button key={n.name} type="button" title={n.hint} onClick={() => onNudge(n.name)} className="rounded border border-white/15 px-1.5 py-0.5 text-neutral-200 hover:bg-white/10">
+              {n.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {onlyUncertain && (
+        <p className="border-b border-white/10 bg-amber-400/10 px-3 py-1.5 text-xs text-amber-100">
+          Showing only what needs your eye.{" "}
+          <button type="button" onClick={onShowAll} className="underline hover:text-white">
+            Show everything
+          </button>
+        </p>
+      )}
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
         <section>
           <h3 className="mb-1.5 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-amber-300">
@@ -118,6 +148,8 @@ export function ReviewPanel({ project, selected, fresh, onSelect, onAccept, onRe
             <ul className="space-y-1.5">{needs.map((s) => <QueueRow key={s.id} s={s} {...rowProps} />)}</ul>
           )}
         </section>
+        {!onlyUncertain && (
+        <>
         <details>
           <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-neutral-300">
             Confident edits ({confident.length}), spot-check
@@ -128,6 +160,8 @@ export function ReviewPanel({ project, selected, fresh, onSelect, onAccept, onRe
           <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-neutral-300">Reviewed ({done.length})</summary>
           <ul className="mt-1.5 space-y-1.5">{done.map((s) => <QueueRow key={s.id} s={s} {...rowProps} />)}</ul>
         </details>
+        </>
+        )}
       </div>
     </div>
   );

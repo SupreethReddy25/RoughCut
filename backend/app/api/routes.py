@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse
 from sqlmodel import Session, select
 
 from app import config
+from app import music as music_lib
 from app.api.io import (
     EventIn,
     FinalizeIn,
@@ -23,6 +24,7 @@ from app.api.io import (
     RenderIn,
     SeenIn,
     StateOut,
+    TrackOut,
     UserIn,
     UserOut,
 )
@@ -93,6 +95,40 @@ def font(name: str):
     return FileResponse(path, media_type="font/ttf", headers={"Cache-Control": "public, max-age=86400"})
 
 
+# --------------------------------------------------------------------------- background music
+def _need_user(session: Session, user_id: int) -> None:
+    if session.get(User, user_id) is None:
+        raise ApiError(404, f"user {user_id} not found")
+
+
+@router.get("/music", response_model=list[TrackOut])
+def list_music(user_id: int, ctx: AppContext = Depends(get_ctx), session: Session = Depends(get_session)):
+    """The bundled tracks and the user's own uploads."""
+    _need_user(session, user_id)
+    return music_lib.list_tracks(ctx.data_dir, user_id)
+
+
+@router.get("/music/{track_id}/audio")
+def music_audio(track_id: str, user_id: int, ctx: AppContext = Depends(get_ctx)):
+    """The audio of a track (for the preview player; Range requests work)."""
+    path = music_lib.track_path(ctx.data_dir, user_id, track_id)
+    if path is None:
+        raise ApiError(404, f"no music track {track_id!r}")
+    return FileResponse(path, media_type="audio/mpeg" if path.suffix == ".mp3" else "audio/wav")
+
+
+@router.post("/users/{user_id}/music", response_model=TrackOut, status_code=201)
+def upload_music(user_id: int, file: UploadFile = File(...), ctx: AppContext = Depends(get_ctx),
+                 session: Session = Depends(get_session)):
+    """Add the user's own track (mp3 / wav, at most 10 MB)."""
+    _need_user(session, user_id)
+    data = file.file.read(music_lib.MAX_UPLOAD_BYTES + 1)
+    try:
+        return music_lib.save_upload(ctx.data_dir, user_id, file.filename or "", data)
+    except music_lib.MusicError as e:
+        raise ApiError(422, str(e)) from None
+
+
 # --------------------------------------------------------------------------- projects
 @router.get("/projects", response_model=list[ProjectSummary])
 def list_projects(user_id: int, ctx: AppContext = Depends(get_ctx), session: Session = Depends(get_session)):
@@ -142,10 +178,11 @@ def _save_uploads(ctx: AppContext, files: list[UploadFile], order: str | None) -
 @router.post("/projects", response_model=ProjectSummary, status_code=201)
 def create_project(files: list[UploadFile] = File(...), user_id: int = Form(...), type: str = Form("other"),
                    target: float | None = Form(None), title: str = Form(""), order: str | None = Form(None),
+                   autopilot: bool = Form(False),
                    ctx: AppContext = Depends(get_ctx), session: Session = Depends(get_session)):
     paths, names = _save_uploads(ctx, files, order)
     try:
-        v = pj.create_project(ctx, session, user_id, paths, names, type, target, title)
+        v = pj.create_project(ctx, session, user_id, paths, names, type, target, title, autopilot)
     except BaseException:
         shutil.rmtree(paths[0].parent, ignore_errors=True)
         raise

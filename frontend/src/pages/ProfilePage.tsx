@@ -70,6 +70,30 @@ export default function ProfilePage() {
         ))}
       </div>
 
+      <section className="rounded-xl border border-white/10 bg-neutral-900 p-3" data-testid="trust">
+        <h2 className="mb-1 text-sm font-medium text-neutral-200">Trust score</h2>
+        {profile.trust === null ? (
+          <p className="text-xs text-neutral-500">
+            Not yet: finish and export a video you reviewed. A batch video is called “Ready to post” once your trust is at least{" "}
+            {pct(profile.trust_threshold)}.
+          </p>
+        ) : (
+          <>
+            <div className="flex items-center gap-3">
+              <span className="text-2xl font-semibold">{pct(profile.trust)}</span>
+              <div className="relative h-2 flex-1 rounded bg-white/10">
+                <div className={`h-full rounded ${profile.trust >= profile.trust_threshold ? "bg-emerald-500" : "bg-sky-500"}`} style={{ width: pct(profile.trust) }} />
+                <div className="absolute -top-1 h-4 w-px bg-white/60" style={{ left: pct(profile.trust_threshold) }} title={`needed: ${pct(profile.trust_threshold)}`} />
+              </div>
+            </div>
+            <p className="mt-1 text-xs text-neutral-500">
+              How often you accepted what was suggested in your last 2 reviewed videos.{" "}
+              {profile.trust >= profile.trust_threshold ? "Batch videos can be marked “Ready to post”." : `Batch videos are marked “Ready to post” from ${pct(profile.trust_threshold)}.`}
+            </p>
+          </>
+        )}
+      </section>
+
       <section className="rounded-xl border border-white/10 bg-neutral-900 p-3">
         <h2 className="mb-2 text-sm font-medium text-neutral-200">Your editing style (what the agent thinks you like)</h2>
         {mix.length === 0 ? (

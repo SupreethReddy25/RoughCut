@@ -69,6 +69,8 @@ export interface StateOut {
   message: string | null;
   events: Record<string, unknown>[];
   caption_breaks: (number | null)[];
+  /** the source word ids of every caption line (line i of edl.captions.lines) */
+  caption_word_ids: number[][];
   text_breaks: Record<string, number | null>;
 }
 
@@ -101,6 +103,11 @@ export interface ProjectSummary {
   created_at: number;
   updated_at: number;
   has_thumbnail: boolean;
+  /** batch video (PLAN 8.8): "ready" = can be posted as it is, "review" = needs a look */
+  autopilot: boolean;
+  badge: "ready" | "review" | null;
+  n_review: number;
+  expected_corrections: number | null;
 }
 
 export interface ProjectOut extends ProjectSummary, Omit<StateOut, "status"> {
@@ -118,12 +125,23 @@ export interface FinalizeOut extends StateOut {
   implicit_events: number;
 }
 
+export interface TrackOut {
+  id: string;
+  name: string;
+  mood: string;
+  duration: number;
+  source: "library" | "upload";
+}
+
 export interface ProfileOut {
   user: UserOut;
   n_projects: number;
   n_finalized: number;
   n_learning_events: number;
   style_mixture: StyleOut | null;
+  /** acceptance rate of the last 2 reviewed videos, null until there is one */
+  trust: number | null;
+  trust_threshold: number;
   metrics: {
     video_index: number;
     project_id: number;

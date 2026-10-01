@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ProjectOut, SuggestionOut } from "../api-types";
 import { confidenceColor } from "../lib/describe";
 import { fmtTime } from "../lib/format";
+import { dragOverlay, type DragMode } from "../lib/overlay";
 import type { Sel } from "./TranscriptEditor";
 
 interface Props {
@@ -13,7 +14,11 @@ interface Props {
   onSeekOut: (o: number) => void;
   onSelect: (s: SuggestionOut) => void;
   onSelectText: (id: string | null) => void;
+  /** a text bar was moved / resized on the text track (output seconds) */
+  onOverlayChange?: (id: string, t0: number, t1: number) => void;
 }
+
+const EDGE_PX = 7; // grab zone at either end of a text bar
 
 export interface ClipBlock {
   index: number;
@@ -54,8 +59,11 @@ const MAX_PPS = 120;
  * Timeline (PLAN Phase 4): clips with zoom badges and a confidence dot per clip, a ruler, the playhead, and the
  * text-overlay track. Click to seek; click a clip's dot to review its weakest decision.
  */
-export function Timeline({ project, outTime, playing, selected, selectedText, onSeekOut, onSelect, onSelectText }: Props) {
+export function Timeline({ project, outTime, playing, selected, selectedText, onSeekOut, onSelect, onSelectText, onOverlayChange }: Props) {
   const edl = project.edl;
+  const [drag, setDrag] = useState<{ id: string; t0: number; t1: number } | null>(null);
+  const dragStart = useRef<{ x: number; mode: DragMode; t0: number; t1: number } | null>(null);
+  const moved = useRef(false);
   const scroller = useRef<HTMLDivElement>(null);
   const [pps, setPps] = useState(24);
   const blocks = useMemo(() => layoutClips(project), [project]);
@@ -139,24 +147,58 @@ export function Timeline({ project, outTime, playing, selected, selectedText, on
             );
           })}
           <div className="absolute left-0 top-[78px] text-[9px] uppercase tracking-wide text-neutral-500">text</div>
-          {edl.texts.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              data-testid={`text-bar-${t.id}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                onSelectText(selectedText === t.id ? null : t.id);
-              }}
-              className={`absolute top-[90px] h-5 truncate rounded px-1 text-left text-[10px] ${
-                selectedText === t.id ? "bg-amber-400 text-black" : "bg-amber-500/50 text-amber-50"
-              }`}
-              style={{ left: t.t0 * pps, width: Math.max((t.t1 - t.t0) * pps, 12) }}
-              title={t.text}
-            >
-              {t.text}
-            </button>
-          ))}
+          {edl.texts.map((t) => {
+            const a = drag?.id === t.id ? drag.t0 : t.t0;
+            const b = drag?.id === t.id ? drag.t1 : t.t1;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                data-testid={`text-bar-${t.id}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (moved.current) return; // the click that ends a drag is not a selection
+                  onSelectText(selectedText === t.id ? null : t.id);
+                }}
+                onPointerDown={(e) => {
+                  if (!onOverlayChange || e.button !== 0) return;
+                  e.stopPropagation();
+                  const r = e.currentTarget.getBoundingClientRect();
+                  const mode: DragMode = e.clientX - r.left <= EDGE_PX ? "start" : r.right - e.clientX <= EDGE_PX ? "end" : "move";
+                  e.currentTarget.setPointerCapture?.(e.pointerId);
+                  dragStart.current = { x: e.clientX, mode, t0: t.t0, t1: t.t1 };
+                  moved.current = false;
+                }}
+                onPointerMove={(e) => {
+                  const s = dragStart.current;
+                  if (!s) return;
+                  if (Math.abs(e.clientX - s.x) > 2) moved.current = true;
+                  if (!moved.current) return;
+                  const [n0, n1] = dragOverlay(s.mode, s.t0, s.t1, (e.clientX - s.x) / pps, duration);
+                  setDrag({ id: t.id, t0: n0, t1: n1 });
+                }}
+                onPointerUp={() => {
+                  const s = dragStart.current;
+                  dragStart.current = null;
+                  const d = drag;
+                  setDrag(null);
+                  setTimeout(() => (moved.current = false), 0); // after the click that ends the drag has been ignored
+                  if (s && moved.current && d && d.id === t.id && (d.t0 !== s.t0 || d.t1 !== s.t1)) onOverlayChange?.(t.id, d.t0, d.t1);
+                }}
+                onPointerCancel={() => {
+                  dragStart.current = null;
+                  setDrag(null);
+                }}
+                className={`absolute top-[90px] h-5 touch-none truncate rounded px-1 text-left text-[10px] ${onOverlayChange ? "cursor-grab" : ""} ${
+                  selectedText === t.id ? "bg-amber-400 text-black" : "bg-amber-500/50 text-amber-50"
+                }`}
+                style={{ left: a * pps, width: Math.max((b - a) * pps, 12) }}
+                title={`${t.text} (drag to move, pull an end to resize)`}
+              >
+                {t.text}
+              </button>
+            );
+          })}
           <div
             data-testid="playhead"
             className="pointer-events-none absolute top-0 h-full w-px bg-rose-400"

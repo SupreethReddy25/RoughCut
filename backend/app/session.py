@@ -189,15 +189,30 @@ def make_suggestion(item: Item, choice: Choice, policy: Policy, video_id: str, s
     )
 
 
+def greedy_choice(policy: Policy, decision_type: str, ctx: dict[str, float],
+                  offsets: dict[str, float] | None = None) -> Choice:
+    """The posterior-mean argmax with no exploration (autopilot, PLAN 8.8): propensity 1; the confidence is the
+    probability Thompson sampling would have given that action, so the review queue still ranks it honestly."""
+    scores = policy.mean_scores(decision_type, ctx)
+    for arm, o in (offsets or {}).items():
+        if arm in scores:
+            scores[arm] += o
+    best = max(scores, key=lambda a: scores[a])
+    probs = policy.choose(decision_type, ctx, offsets).probs
+    return Choice(best, 1.0, probs.get(best, 0.5), False, probs)
+
+
 def suggest(uf: UnitsFile, word_feats: dict[int, dict[str, float]] | None, policy: Policy, *,
             video_type: str | None = None, offsets: dict[str, dict[str, float]] | None = None,
-            source: str = "policy") -> SuggestionSet:
-    """Run `policy` over the whole video (every proposal is applied), returning suggestions + decisions."""
+            source: str = "policy", greedy: bool = False) -> SuggestionSet:
+    """Run `policy` over the whole video (every proposal is applied), returning suggestions + decisions.
+    `greedy` = no exploration: the posterior mean decides (autopilot)."""
     sess = EditSession(uf, word_feats, video_type)
     sugs, items, best = [], [], []
     for item in sess.items():
         off = (offsets or {}).get(item.decision_type)
-        choice = policy.choose(item.decision_type, item.ctx, off)
+        choice = (greedy_choice(policy, item.decision_type, item.ctx, off) if greedy
+                  else policy.choose(item.decision_type, item.ctx, off))
         scores = policy.mean_scores(item.decision_type, item.ctx)
         best.append(max(scores, key=lambda a: scores[a]))
         sugs.append(make_suggestion(item, choice, policy, uf.video_id, source))
