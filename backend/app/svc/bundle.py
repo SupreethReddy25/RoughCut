@@ -10,6 +10,7 @@ from app.appctx import Analysis, AppContext
 from app.edl.build import build_edl_with_lines
 from app.models import EventRow, SuggestionRow, UnitRow, Video, vid_str
 from app.policy.log_replay import Learner
+from app.policy.style import summarize
 from app.render.ass import caption_breaks, text_breaks
 from app.state import EditState, current_action, rebuild
 
@@ -127,7 +128,10 @@ def style_out(learner: Learner | None) -> StyleOut | None:
     if learner is None or learner.mixture is None:
         return None
     m = learner.mixture
-    return StyleOut(weights=m.weights(), n_events=m.n_events, frozen=m.frozen)
+    weights = m.weights()
+    s = summarize(weights, m.n_events)
+    return StyleOut(weights=weights, n_events=m.n_events, frozen=m.frozen, text=s.text, top=s.top,
+                    identified=s.identified)
 
 
 def build_edl_for(b: Bundle):

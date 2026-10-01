@@ -15,3 +15,20 @@ class ResizeObserverStub {
 }
 (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = ResizeObserverStub;
 if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => {};
+
+// Recent Node versions ship their own (experimental, path-less) localStorage that shadows jsdom's: use a plain in-memory one.
+if (typeof localStorage === "undefined" || typeof localStorage.clear !== "function") {
+  const data = new Map<string, string>();
+  const store = {
+    getItem: (k: string) => (data.has(k) ? data.get(k)! : null),
+    setItem: (k: string, v: string) => void data.set(k, String(v)),
+    removeItem: (k: string) => void data.delete(k),
+    clear: () => data.clear(),
+    key: (i: number) => [...data.keys()][i] ?? null,
+    get length() {
+      return data.size;
+    },
+  };
+  Object.defineProperty(globalThis, "localStorage", { value: store, configurable: true });
+  Object.defineProperty(window, "localStorage", { value: store, configurable: true });
+}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import type { ManualEditIn, ProjectOut, SuggestionOut } from "../api-types";
+import type { EventIn, ManualEditIn, ProjectOut, SuggestionOut } from "../api-types";
 import { CaptionStrip } from "../components/CaptionStrip";
 import { CaptionStylePanel } from "../components/CaptionStylePanel";
 import { ExportDialog } from "../components/ExportDialog";
@@ -14,12 +14,22 @@ import { useActiveSeconds } from "../hooks/useActiveSeconds";
 import { useProject, type ProjectApi } from "../hooks/useProject";
 import { useFonts, useStyles } from "../hooks/useStyles";
 import { useUser } from "../hooks/useUser";
-import { acceptEvent, chooseEvent, keyOf, nextInQueue, rejectEvent, sameKey } from "../lib/decide";
+import { acceptEvent, chooseEvent, keyOf, nextInQueue, nextUncertain, rejectEvent, sameKey } from "../lib/decide";
 import { actionsFor, targetStart } from "../lib/describe";
 import { fmtTime } from "../lib/format";
 import { isInteractiveTarget, isTypingTarget, resolveShortcut } from "../lib/shortcuts";
 
 const PRESET = "reels";
+const AUTO_ADVANCE_KEY = "roughcut.autoAdvance";
+
+/** "Next after each decision" is on unless the user turned it off (remembered in the browser). */
+function readAutoAdvance(): boolean {
+  try {
+    return localStorage.getItem(AUTO_ADVANCE_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
 const POLL_MS = 2000;
 
 type Ready = ProjectOut & { edl: NonNullable<ProjectOut["edl"]> };
@@ -104,6 +114,15 @@ function Workspace({ api, project }: { api: ProjectApi; project: Ready }) {
   const [params, setParams] = useSearchParams();
   const onlyUncertain = params.get("review") === "1"; // opened from a batch video's "Needs review" badge
   const [tab, setTab] = useState<"review" | "style" | "music">("review");
+  const [autoAdvance, setAutoAdvanceState] = useState(readAutoAdvance);
+  const setAutoAdvance = useCallback((on: boolean) => {
+    setAutoAdvanceState(on);
+    try {
+      localStorage.setItem(AUTO_ADVANCE_KEY, on ? "1" : "0");
+    } catch {
+      /* not remembered */
+    }
+  }, []);
   const [showSafe, setShowSafe] = useState(false);
   const [reframe, setReframe] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -113,8 +132,8 @@ function Workspace({ api, project }: { api: ProjectApi; project: Ready }) {
   const selected: SuggestionOut | null = useMemo(() => project.suggestions.find((s) => sameKey(s, sel)) ?? null, [project.suggestions, sel]);
 
   // the global key handler reads the latest values from here
-  const live = useRef({ api, project, selected, sel, selText, exporting, units, words });
-  live.current = { api, project, selected, sel, selText, exporting, units, words };
+  const live = useRef({ api, project, selected, sel, selText, exporting, units, words, autoAdvance });
+  live.current = { api, project, selected, sel, selText, exporting, units, words, autoAdvance };
 
   const select = useCallback((s: SuggestionOut) => {
     setSel(keyOf(s));
@@ -124,6 +143,17 @@ function Workspace({ api, project }: { api: ProjectApi; project: Ready }) {
   }, []);
 
   const { send, markSeen } = api;
+  /** A review decision (accept / reject / choose). With "next after each" on, the selection then moves to the next
+   *  uncertain suggestion of the state the server answered with. */
+  const decide = useCallback(
+    async (ev: EventIn) => {
+      const out = await live.current.api.send(ev);
+      if (!out || !live.current.autoAdvance) return;
+      const next = nextUncertain(out.suggestions, out.queue);
+      if (next) select(next);
+    },
+    [select],
+  );
   const onEdit = useCallback((edit: ManualEditIn) => void send({ kind: "manual", edit }), [send]);
   const onCaptionText = useCallback((word_id: number, text: string) => void send({ kind: "caption_text", payload: { word_id, text } }), [send]);
   const onSetting = useCallback((key: string, value: unknown) => void send({ kind: "setting", payload: { key, value } }), [send]);
@@ -171,17 +201,17 @@ function Workspace({ api, project }: { api: ProjectApi; project: Ready }) {
           break;
         case "accept": {
           const ev = acceptEvent(L.selected);
-          if (ev) void L.api.send(ev);
+          if (ev) void decide(ev);
           break;
         }
         case "reject": {
           const ev = rejectEvent(L.selected);
-          if (ev) void L.api.send(ev);
+          if (ev) void decide(ev);
           break;
         }
         case "choose": {
           const ev = L.selected ? chooseEvent(L.selected, actionsFor(L.selected)[act.index]) : null;
-          if (ev) void L.api.send(ev);
+          if (ev) void decide(ev);
           break;
         }
         case "next": {
@@ -207,7 +237,7 @@ function Workspace({ api, project }: { api: ProjectApi; project: Ready }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [select]);
+  }, [select, decide]);
 
   // A button that was clicked with the mouse must not keep the focus, or Space would press it again instead of
   // playing. (detail is 0 for a keyboard activation, which keeps its focus.)
@@ -332,20 +362,23 @@ function Workspace({ api, project }: { api: ProjectApi; project: Ready }) {
                 selected={sel}
                 fresh={api.fresh}
                 onNudge={onNudge}
+                styleText={project.style_mixture?.text}
+                autoAdvance={autoAdvance}
+                onAutoAdvance={setAutoAdvance}
                 onlyUncertain={onlyUncertain}
                 onShowAll={() => setParams({}, { replace: true })}
                 onSelect={select}
                 onAccept={(s) => {
                   const ev = acceptEvent(s);
-                  if (ev) void api.send(ev);
+                  if (ev) void decide(ev);
                 }}
                 onReject={(s) => {
                   const ev = rejectEvent(s);
-                  if (ev) void api.send(ev);
+                  if (ev) void decide(ev);
                 }}
                 onChoose={(s, a) => {
                   const ev = chooseEvent(s, a);
-                  if (ev) void api.send(ev);
+                  if (ev) void decide(ev);
                 }}
               />
             ) : tab === "music" ? (

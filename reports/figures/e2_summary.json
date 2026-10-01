@@ -1,0 +1,146 @@
+{
+ "cold_start": {
+  "none": {
+   "early": 0.8167754913482852,
+   "mean_curve": [
+    0.7577168081485364,
+    0.8317053446398799,
+    0.8609043212564396,
+    0.8805822098452937,
+    0.8817607325216041,
+    0.8837309680691381
+   ],
+   "by_persona": {
+    "snappy": 0.7860154598588555,
+    "relaxed": 0.8966796293341923,
+    "storyteller": 0.7818503762789369,
+    "minimalist": 0.8101720758196402,
+    "focused": 0.8219033908861723,
+    "blend": 0.8040320159119146
+   }
+  },
+  "generic": {
+   "early": 0.8342112389282151,
+   "mean_curve": [
+    0.7881942381226755,
+    0.8504948604668396,
+    0.8639446181951306,
+    0.8768472004967135,
+    0.8817311086383015,
+    0.8911733634486002
+   ],
+   "by_persona": {
+    "snappy": 0.7861497695494276,
+    "relaxed": 0.9098855733411964,
+    "storyteller": 0.8250529357078341,
+    "minimalist": 0.8033752123464232,
+    "focused": 0.8678495380364842,
+    "blend": 0.8129544045879253
+   }
+  },
+  "mixture": {
+   "early": 0.8408409440158373,
+   "mean_curve": [
+    0.8026913769793554,
+    0.8483901054964431,
+    0.871441349571714,
+    0.8817742404458324,
+    0.8933867851904294,
+    0.8987780545350508
+   ],
+   "by_persona": {
+    "snappy": 0.8398076856057869,
+    "relaxed": 0.9065110765144816,
+    "storyteller": 0.8063794801704168,
+    "minimalist": 0.8029512926770441,
+    "focused": 0.8315948331920201,
+    "blend": 0.8578012959352758
+   }
+  }
+ },
+ "identification": {
+  "plain": {
+   "by_persona": {
+    "snappy": {
+     "median": 7.5,
+     "max": 39,
+     "identified": "10/10",
+     "stable_median": 10.0
+    },
+    "relaxed": {
+     "median": 4.0,
+     "max": 13,
+     "identified": "10/10",
+     "stable_median": 4.0
+    },
+    "storyteller": {
+     "median": 3.0,
+     "max": 5,
+     "identified": "10/10",
+     "stable_median": 3.0
+    },
+    "minimalist": {
+     "median": 4.5,
+     "max": 13,
+     "identified": "10/10",
+     "stable_median": 4.5
+    },
+    "focused": {
+     "median": 2.0,
+     "max": 6,
+     "identified": "10/10",
+     "stable_median": 2.0
+    },
+    "blend": {
+     "median": 5.0,
+     "max": 7,
+     "identified": "10/10",
+     "stable_median": 5.0
+    }
+   },
+   "median_over_personas": 4.25
+  },
+  "product": {
+   "by_persona": {
+    "snappy": {
+     "median": 7.0,
+     "max": 11,
+     "identified": "10/10",
+     "stable_median": 7.0
+    },
+    "relaxed": {
+     "median": 4.0,
+     "max": 9,
+     "identified": "10/10",
+     "stable_median": 4.0
+    },
+    "storyteller": {
+     "median": 3.0,
+     "max": 13,
+     "identified": "10/10",
+     "stable_median": 3.0
+    },
+    "minimalist": {
+     "median": 4.0,
+     "max": 12,
+     "identified": "10/10",
+     "stable_median": 5.5
+    },
+    "focused": {
+     "median": 2.5,
+     "max": 6,
+     "identified": "10/10",
+     "stable_median": 2.5
+    },
+    "blend": {
+     "median": 5.0,
+     "max": 8,
+     "identified": "10/10",
+     "stable_median": 5.0
+    }
+   },
+   "median_over_personas": 4.0
+  }
+ },
+ "threshold": 0.8
+}

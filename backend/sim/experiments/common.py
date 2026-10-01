@@ -15,8 +15,9 @@ import numpy as np
 from app.policy.base import Policy
 from app.policy.linear import EpsGreedyLinear, GlobalPolicy, LinTS, LinUCB
 from app.policy.log_replay import Learner
-from app.policy.prior import Prior, StyleMixture, fit_prior
+from app.policy.prior import Prior, fit_prior
 from app.policy.rule import RulePolicy
+from app.policy.style import StyleMixture
 from app.session import EditSession
 from sim.personas import BASE_PERSONAS, Persona, make_persona
 from sim.session import DECISION_TYPES, UserRun, run_user

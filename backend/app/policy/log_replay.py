@@ -10,8 +10,8 @@ from collections.abc import Callable, Iterable
 
 from app.policy import context
 from app.policy.base import Policy
-from app.policy.prior import StyleMixture
 from app.policy.reward import DEFAULT, LEARNED_KINDS, RewardConfig, Update, updates_for
+from app.policy.style import StyleMixture
 from app.schemas import Event, Suggestion
 
 

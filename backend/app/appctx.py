@@ -20,17 +20,20 @@ from app.pipeline.run import run_pipeline
 from app.pipeline.vision import FaceSample
 from app.policy.linear import LinTS
 from app.policy.log_replay import Learner, replay
-from app.policy.prior import Prior, StyleMixture, load_shipped_priors
+from app.policy.prior import Prior, load_shipped_priors
 from app.policy.reward import LEARNED_KINDS
 from app.policy.store import PolicyStore
+from app.policy.style import StyleMixture
 from app.schemas import UnitsFile
 
 # Product settings of the per-user bandit (tuned in the simulator, see reports/figures and the Phase 3 notes):
 # a stronger prior than the PLAN default lam=2 keeps ONE click from re-scoring the whole video (with lam=2 a single
-# phrase cut flipped ~30 confident phrase suggestions), and a softer style posterior (sigma=3 instead of 0.7) stops
-# the style mixture from collapsing onto one prototype after a single event. Simulator accuracy is unchanged.
+# phrase cut flipped ~30 confident phrase suggestions), and the prior mean follows the style posterior softly
+# (prior sigma 3 instead of 0.7) so it does not collapse onto one prototype after a single event. The displayed
+# posterior stays sharp (policy/style.py). Simulator accuracy is unchanged.
 PRODUCT_LAMBDA = 10.0
-STYLE_SIGMA = 3.0
+STYLE_SIGMA = 0.7  # the style posterior itself (PLAN 7.2): sharp, so a style is identified quickly
+STYLE_PRIOR_SIGMA = 3.0  # ... but the prior mean the bandit starts from follows it softly (see policy/style.py)
 
 log = logging.getLogger(__name__)
 IngestFn = Callable[[list[Path], str, str, Path], UnitsFile]
@@ -52,7 +55,7 @@ def _config_key(shipped) -> str:
     import hashlib
     import json
 
-    h = hashlib.sha1(f"{PRODUCT_LAMBDA}|{STYLE_SIGMA}".encode())
+    h = hashlib.sha1(f"{PRODUCT_LAMBDA}|{STYLE_SIGMA}|{STYLE_PRIOR_SIGMA}".encode())
     if shipped is not None:
         generic, protos = shipped
         h.update(json.dumps([generic.to_dict(), {k: p.to_dict() for k, p in sorted(protos.items())}],
@@ -80,7 +83,7 @@ class PolicyManager:
         shipped = self.ctx.shipped_priors
         if shipped is not None:
             generic, protos = shipped
-            mixture = StyleMixture(protos, generic, sigma=STYLE_SIGMA)
+            mixture = StyleMixture(protos, generic, sigma=STYLE_SIGMA, prior_sigma=STYLE_PRIOR_SIGMA)
             return Learner(LinTS(mixture.mean_prior(), lam=PRODUCT_LAMBDA, seed=user_id), mixture)
         return Learner(LinTS(Prior(), lam=PRODUCT_LAMBDA, seed=user_id), None)
 

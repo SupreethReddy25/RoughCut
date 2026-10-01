@@ -77,6 +77,9 @@ class StyleOut(BaseModel):
     weights: dict[str, float]
     n_events: int
     frozen: bool
+    text: str = ""  # "Your style so far: 70% Snappy · 25% Storyteller" (PLAN 7.2)
+    top: str | None = None  # the most likely named style
+    identified: bool = False  # its weight is above 0.8
 
 
 class ChangeOut(BaseModel):
@@ -152,6 +155,10 @@ class ProfileOut(BaseModel):
     metrics: list[dict]
     trust: float | None = None  # explicit-acceptance rate of the last 2 reviewed videos (PLAN 8.8); None = not enough yet
     trust_threshold: float = 0.85
+    preferences: list[dict] = Field(default_factory=list)  # [{decision_type, text}]: what it has learned, in sentences
+    stats: dict | None = None  # editing statistics of the finished videos (PLAN 16.3); None until there is one
+    style_labels: dict[str, dict] = Field(default_factory=dict)  # style key -> {label, blurb}
+    n_decisions_by_type: dict[str, int] = Field(default_factory=dict)  # learned updates per decision type
 
 
 class TrackOut(BaseModel):

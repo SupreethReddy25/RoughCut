@@ -36,6 +36,12 @@ export interface StyleOut {
   weights: Record<string, number>;
   n_events: number;
   frozen: boolean;
+  /** "Your style so far: 70% Snappy · 22% Storyteller" */
+  text: string;
+  /** the most likely named style */
+  top: string | null;
+  /** its weight is above 0.8 */
+  identified: boolean;
 }
 
 export interface ChangeOut {
@@ -142,6 +148,19 @@ export interface ProfileOut {
   /** acceptance rate of the last 2 reviewed videos, null until there is one */
   trust: number | null;
   trust_threshold: number;
+  /** what the agent has learned, as sentences ("You remove pauses longer than ~0.5 s.") */
+  preferences: { decision_type: string; text: string }[];
+  /** editing statistics of the finished videos; null before the first */
+  stats: {
+    n_videos: number;
+    avg_clip_seconds: number;
+    cuts_per_minute: number;
+    zooms_per_minute: number;
+    percent_kept: number;
+    fillers_removed_per_minute: number;
+  } | null;
+  style_labels: Record<string, { label: string; blurb: string }>;
+  n_decisions_by_type: Record<string, number>;
   metrics: {
     video_index: number;
     project_id: number;

@@ -1,5 +1,5 @@
 // Small hand-made projects for component tests (no server needed).
-import type { ProjectOut, SuggestionOut } from "../api-types";
+import type { ProfileOut, ProjectOut, SuggestionOut } from "../api-types";
 import type { Clip, Unit, Word } from "../types";
 
 export function word(id: number, unit: number, start: number, end: number, text: string): Word {
@@ -57,5 +57,13 @@ export function makeProject(over: Partial<ProjectOut> = {}): ProjectOut {
     caption_breaks: [], text_breaks: {}, caption_word_ids: [[0, 1], [2, 3], [4, 5]], source_map: [], units, words, seen_unit_ids: [], exports: {}, job: null,
     source: { width: 1920, height: 1080 },
     ...over,
+  };
+}
+
+export function makeProfile(over: Partial<ProfileOut> = {}): ProfileOut {
+  return {
+    user: { id: 1, name: "Tester", created_at: 0 }, n_projects: 3, n_finalized: 2, n_learning_events: 10,
+    style_mixture: null, trust: null, trust_threshold: 0.85, preferences: [], stats: null, style_labels: {},
+    n_decisions_by_type: {}, metrics: [], ...over,
   };
 }

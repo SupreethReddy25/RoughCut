@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProfileOut, ProjectSummary, StateOut, StylesOut } from "../api-types";
-import { makeProject } from "../test/factory";
+import { makeProfile, makeProject } from "../test/factory";
 
 vi.mock("../api", async () => {
   const actual = await vi.importActual<typeof import("../api")>("../api");
@@ -164,10 +164,7 @@ describe("Projects page: batch videos", () => {
 });
 
 describe("Profile: trust score", () => {
-  const profile = (trust: number | null): ProfileOut => ({
-    user: { id: 1, name: "Tester", created_at: 0 }, n_projects: 3, n_finalized: 2, n_learning_events: 10, style_mixture: null, metrics: [],
-    trust, trust_threshold: 0.85,
-  });
+  const profile = (trust: number | null): ProfileOut => makeProfile({ trust });
   const open = (p: ProfileOut) => {
     mocked.getProfile.mockResolvedValue(p);
     render(<MemoryRouter><ProfilePage /></MemoryRouter>);
@@ -216,8 +213,9 @@ async function openEditor(url = "/projects/7", project = makeProject()) {
     </MemoryRouter>,
   );
   await screen.findByTestId("player");
+  await flush(); // passive effects (the keyboard listener) run after the commit that findBy saw
 }
-const flush = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+const flush = () => act(async () => { for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 10)); }); // a few turns of the event loop, so a loaded machine cannot outrun it
 
 describe("Editor: Phase 5 controls", () => {
   it("a global nudge is one nudge event", async () => {

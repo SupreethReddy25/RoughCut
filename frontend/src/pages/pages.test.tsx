@@ -176,10 +176,11 @@ async function openEditor(project = makeProject()) {
     </MemoryRouter>,
   );
   await screen.findByTestId("player");
+  await flush(); // passive effects (the keyboard listener) run after the commit that findBy saw
 }
 
 const key = (k: string, init: KeyboardEventInit = {}) => fireEvent.keyDown(document.body, { key: k, ...init });
-const flush = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+const flush = () => act(async () => { for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 10)); }); // a few turns of the event loop, so a loaded machine cannot outrun it
 
 describe("Editor keyboard", () => {
   it("J selects the least confident suggestion and seeks to it; A accepts it", async () => {

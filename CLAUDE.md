@@ -26,7 +26,7 @@ backend\.venv\Scripts\python.exe backend\scripts\make_frontend_fixtures.py
 backend\.venv\Scripts\python.exe -m app.pipeline.run data\raw\clip_01_main.mp4 --type vlog
 backend\.venv\Scripts\python.exe -m app.edl.run clip_01_main
 backend\.venv\Scripts\python.exe -m app.render.run data\processed\clip_01_main\edl.json --out reports\demo.mp4
-# simulator experiments -> reports/figures/ (E1: learning curves, E3: cross-persona, E4: drift)
+# simulator experiments -> reports/figures/ (E1: learning curves, E2: style prior + decisions to identify the style, E3: cross-persona, E4: drift, E8: review budget)
 cd backend; .\.venv\Scripts\python.exe -m sim.experiments.e1; .\.venv\Scripts\python.exe -m sim.experiments.e3; .\.venv\Scripts\python.exe -m sim.experiments.e4
 # regenerate placeholder test clips into data/raw
 backend\.venv\Scripts\python.exe scripts\make_test_clips.py
@@ -42,3 +42,7 @@ backend\.venv\Scripts\python.exe scripts\make_test_clips.py
 - A new project starts from the user's remembered settings (`User.defaults_json` copied into `Video.settings_json["defaults"]`; they are a starting point, not events) and from a suggested title (overlay id `hook`, deleted/edited with normal text-overlay events).
 - Batch / autopilot videos (`Video.autopilot`): greedy suggestions (`source = "autopilot"`), badge = "ready" when sum(1 - confidence) < 3 and trust >= 0.85 (`svc/projects.py`). One-click export skips finalize on purpose: nothing was reviewed, so nothing is learned.
 - One nudge click moves at most a quarter of each decision type (`svc/rescore.py`).
+
+## Style prior and profile (Phase 6)
+- `app/policy/style.py`: the style posterior (sigma 0.7, the sentence "Your style so far: ..." and "identified" above 0.8) and the prior mean it feeds the bandit (tempered with `prior_sigma` = 3 in the product so one click cannot swap the whole prior). `app/policy/preferences.py` turns the learned weights into profile sentences, `app/svc/stats.py` computes the editing statistics.
+- `sim/review.py` + `sim/experiments/e8.py`: budgeted review sessions (uncertainty queue vs random vs timeline).

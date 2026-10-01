@@ -9,9 +9,10 @@ from app.policy.base import Policy
 from app.policy.explain import explain
 from app.policy.linear import EpsGreedyLinear, GlobalPolicy, LinTS, LinUCB
 from app.policy.log_replay import Learner, recompute_from_log, replay
-from app.policy.prior import Prior, StyleMixture, fit_prior
+from app.policy.prior import Prior, fit_prior
 from app.policy.rule import RulePolicy
 from app.policy.store import PolicyStore
+from app.policy.style import StyleMixture
 
 
 def rand_ctx(dt: str, rng: np.random.Generator) -> dict[str, float]:

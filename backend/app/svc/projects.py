@@ -7,6 +7,7 @@ import subprocess
 import time
 from pathlib import Path
 
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app import config
@@ -17,6 +18,7 @@ from app.convert import event_from_row, row_from_suggestion, suggestion_from_row
 from app.models import (
     EventRow,
     Metric,
+    SuggestionRow,
     TextOverlayRow,
     UnitRow,
     User,
@@ -26,13 +28,16 @@ from app.models import (
 )
 from app.pipeline.ingest import probe
 from app.policy.explain import explain
-from app.policy.reward import DEFAULT, updates_for
+from app.policy.preferences import describe_preferences
+from app.policy.reward import DEFAULT, LEARNED_KINDS, updates_for
+from app.policy.style import STYLES
 from app.render.run import render as render_edl
 from app.schemas import OutputSpec
 from app.session import suggest as run_suggest
 from app.state import sanitize_defaults
 from app.svc.bundle import ApiError, Bundle, event_dict, load_bundle, queue_out, state_out, style_out
 from app.svc.events import arms_of, require_ready
+from app.svc.stats import aggregate, video_stats
 
 log = logging.getLogger(__name__)
 PRESETS_PATH = Path(__file__).resolve().parents[1] / "render" / "presets.json"
@@ -69,7 +74,7 @@ def trust_score(session: Session, user_id: int) -> float | None:
 
 
 def profile(ctx: AppContext, session: Session, user_id: int) -> ProfileOut:
-    """Basic profile (PLAN 16.3 is Phase 6): what has been learned from this user so far."""
+    """What the agent has learned about this user (PLAN 16.3): style, sentences, editing statistics, curves, trust."""
     user = session.get(User, user_id)
     if user is None:
         raise ApiError(404, f"user {user_id} not found")
@@ -79,10 +84,28 @@ def profile(ctx: AppContext, session: Session, user_id: int) -> ProfileOut:
         learner = ctx.policies.get(session, user_id)
         style = style_out(learner)
         n_learning = ctx.policies.fingerprint(session, user_id)[0]
+        evidence = dict(session.exec(
+            select(SuggestionRow.decision_type, func.count(EventRow.id)).join(SuggestionRow, SuggestionRow.id == EventRow.suggestion_id)
+            .where(EventRow.user_id == user_id, EventRow.undone == False,
+                   EventRow.kind.in_(LEARNED_KINDS)).group_by(SuggestionRow.decision_type)).all())
+        preferences = [{"decision_type": p.decision_type, "text": p.text}
+                       for p in describe_preferences(learner.policy, evidence)]
+    finished = [videos[m.video_id] for m in metrics if m.video_id in videos]
+    per_video = []
+    for v in finished:
+        try:
+            st = video_stats(load_bundle(ctx, session, v.id))
+        except Exception:  # a video whose files are gone must not break the profile
+            log.warning("no statistics for project %s", v.id, exc_info=True)
+            continue
+        if st is not None:
+            per_video.append(st)
     return ProfileOut(
         user=UserOut(id=user.id, name=user.name, created_at=user.created_at), n_projects=len(videos),
         n_finalized=len(metrics), n_learning_events=n_learning, style_mixture=style,
-        trust=trust_score(session, user_id), trust_threshold=TRUST_READY,
+        trust=trust_score(session, user_id), trust_threshold=TRUST_READY, preferences=preferences,
+        stats=aggregate(per_video), style_labels={k: {"label": v[0], "blurb": v[1]} for k, v in STYLES.items()},
+        n_decisions_by_type=evidence,
         metrics=[{"video_index": m.video_index, "project_id": m.video_id, "title": videos[m.video_id].title,
                   "acceptance": m.acceptance, "n_decisions": m.n_decisions, "n_reviewed": m.n_reviewed,
                   "n_accepted": m.n_accepted, "n_corrected": m.n_corrected, "n_manual_actions": m.n_manual_actions,

@@ -3,7 +3,7 @@ import { explain } from "../api";
 import type { ExplainOut, ProjectOut, SuggestionOut } from "../api-types";
 import type { Unit, Word } from "../types";
 import { actionLabel, actionsFor, confidenceColor, DECISION_LABEL, describeTarget } from "../lib/describe";
-import { sameKey } from "../lib/decide";
+import { reviewProgress, sameKey } from "../lib/decide";
 import { pct } from "../lib/format";
 import type { Sel } from "./TranscriptEditor";
 
@@ -20,6 +20,11 @@ interface Props {
   /** show only "Needs your eye" (a batch video opened from its "Needs review" badge) */
   onlyUncertain?: boolean;
   onShowAll?: () => void;
+  /** "Your style so far: ..." (PLAN 7.2) */
+  styleText?: string;
+  /** after a decision, jump to the next uncertain suggestion */
+  autoAdvance?: boolean;
+  onAutoAdvance?: (on: boolean) => void;
 }
 
 export const NUDGES: { name: string; label: string; hint: string }[] = [
@@ -106,7 +111,7 @@ function QueueRow({ s, selected, fresh, onSelect, onAccept, onReject, onChoose, 
  * The review queue (PLAN 7.3): "Needs your eye" = confidence below 70 %, least confident first; the confident rest is
  * collapsed ("spot-check"); decided items are listed below. Live re-scoring re-sorts it after every feedback.
  */
-export function ReviewPanel({ project, selected, fresh, onSelect, onAccept, onReject, onChoose, onNudge, onlyUncertain, onShowAll }: Props) {
+export function ReviewPanel({ project, selected, fresh, onSelect, onAccept, onReject, onChoose, onNudge, onlyUncertain, onShowAll, styleText, autoAdvance, onAutoAdvance }: Props) {
   const byId = useMemo(() => new Map(project.suggestions.map((s) => [s.id, s])), [project.suggestions]);
   const units = useMemo(() => new Map(project.units.map((u) => [u.id, u])), [project.units]);
   const words = useMemo(() => new Map(project.words.map((w) => [w.id, w])), [project.words]);
@@ -115,9 +120,29 @@ export function ReviewPanel({ project, selected, fresh, onSelect, onAccept, onRe
   const confident = pick(project.queue.confident);
   const done = project.suggestions.filter((s) => s.status !== "pending");
   const rowProps = { selected, fresh, onSelect, onAccept, onReject, onChoose, units, words };
+  const progress = reviewProgress(project.suggestions, project.queue);
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="review-panel">
+      <div className="space-y-1 border-b border-white/10 px-3 py-2 text-xs" data-testid="review-progress">
+        <div className="flex items-center gap-2">
+          <span className="text-neutral-300">
+            Reviewed {progress.done} of {progress.total}
+          </span>
+          <span className={progress.uncertain === 0 ? "text-emerald-300" : "text-amber-300"}>
+            {progress.uncertain === 0 ? "nothing uncertain left" : `${progress.uncertain} uncertain left`}
+          </span>
+          {onAutoAdvance && (
+            <label className="ml-auto flex items-center gap-1 text-neutral-400" title="After accepting, rejecting or choosing, jump to the next uncertain suggestion">
+              <input type="checkbox" checked={!!autoAdvance} onChange={(e) => onAutoAdvance(e.target.checked)} /> next after each
+            </label>
+          )}
+        </div>
+        <div className="h-1 overflow-hidden rounded bg-white/10" role="progressbar" aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={progress.done} aria-label="Review progress">
+          <div className="h-full bg-sky-500" style={{ width: `${progress.total ? (100 * progress.done) / progress.total : 0}%` }} />
+        </div>
+        {styleText && <p className="text-neutral-400" data-testid="style-text">{styleText}</p>}
+      </div>
       {onNudge && (
         <div className="flex flex-wrap items-center gap-1 border-b border-white/10 px-3 py-2 text-xs" role="group" aria-label="Nudge the whole edit">
           <span className="mr-1 text-neutral-500">Nudge all:</span>

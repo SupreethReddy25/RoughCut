@@ -1,4 +1,4 @@
-"""Priors (PLAN 7.1-7.2): weight sets, ridge fits for style prototypes, and the style-mixture posterior.
+"""Priors (PLAN 7.1-7.2): weight sets and ridge fits for style prototypes (the style posterior is in style.py).
 
 A `Prior` is one full set of weights (theta per decision type and arm; D5 has one shared theta). LinTS uses it as
 the mean of its prior (b0 = lambda * theta_prior). Prototypes are ridge fits on *full-information* labels
@@ -75,47 +75,6 @@ def fit_prior(labeled: Iterable[tuple[str, dict[str, float], str]], alpha: float
     for k, m in xtx.items():
         out[k] = np.linalg.solve(m + alpha * np.eye(m.shape[0]), xty[k])
     return Prior(out)
-
-
-class StyleMixture:
-    """Style posterior over prototypes (PLAN 7.2): log w_k += -(r - score_k(x, a))^2 / (2 sigma^2).
-
-    prior mean = sum_k w_k * theta^(k). It keeps updating while the user has < freeze_after events, then freezes.
-    """
-
-    def __init__(self, prototypes: dict[str, Prior], pooled: Prior, sigma: float = 0.7, freeze_after: int = 200):
-        self.names = ["pooled", *prototypes]
-        self.priors = [pooled, *prototypes.values()]
-        self.sigma = sigma
-        self.freeze_after = freeze_after
-        self.logw = np.zeros(len(self.priors))
-        self.n_events = 0
-        self._mean: Prior | None = None
-
-    @property
-    def frozen(self) -> bool:
-        return self.n_events >= self.freeze_after
-
-    def observe(self, decision_type: str, ctx: dict[str, float], pairs: list[tuple[str, float]]) -> None:
-        """One user EVENT = a list of (arm, reward) updates; it counts once towards the freeze threshold."""
-        if self.frozen:
-            return
-        for k, p in enumerate(self.priors):
-            for arm, reward in pairs:
-                self.logw[k] -= (reward - p.score(decision_type, ctx, arm)) ** 2 / (2 * self.sigma ** 2)
-        self.n_events += 1
-        self._mean = None
-
-    def weights(self) -> dict[str, float]:
-        w = np.exp(self.logw - self.logw.max())
-        w /= w.sum()
-        return dict(zip(self.names, (float(v) for v in w), strict=True))
-
-    def mean_prior(self) -> Prior:
-        if self._mean is None:
-            w = np.array(list(self.weights().values()))
-            self._mean = Prior.mix(self.priors, w)
-        return self._mean
 
 
 # --------------------------------------------------------------------------- shipped priors (assets/priors)

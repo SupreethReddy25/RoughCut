@@ -33,3 +33,23 @@ export function nextInQueue(suggestions: SuggestionOut[], queue: QueueOut, from:
   const i = order.findIndex((s) => sameKey(s, from));
   return order[(i + 1) % order.length];
 }
+
+/** The most uncertain pending suggestion (the top of "Needs your eye"), or null when nothing uncertain is left. */
+export function nextUncertain(suggestions: SuggestionOut[], queue: QueueOut): SuggestionOut | null {
+  const byId = new Map(suggestions.map((s) => [s.id, s]));
+  for (const id of queue.needs_review) {
+    const s = byId.get(id);
+    if (s && s.status === "pending") return s;
+  }
+  return null;
+}
+
+/** How far the review is: decided suggestions out of all, and how many uncertain ones are still open. */
+export function reviewProgress(suggestions: SuggestionOut[], queue: QueueOut): { done: number; total: number; uncertain: number } {
+  const pending = new Set(suggestions.filter((s) => s.status === "pending").map((s) => s.id));
+  return {
+    done: suggestions.length - pending.size,
+    total: suggestions.length,
+    uncertain: queue.needs_review.filter((id) => pending.has(id)).length,
+  };
+}
