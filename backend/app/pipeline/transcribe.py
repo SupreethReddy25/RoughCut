@@ -31,6 +31,7 @@ def transcribe(wav_path, model_size: str = MODEL_SIZE, device: str = "cpu", comp
     segs, info = model.transcribe(
         str(wav_path), language="en", word_timestamps=True, initial_prompt=initial_prompt,
         beam_size=5, vad_filter=False,  # VAD would also strip the fillers we want to see
+        temperature=0.0,  # no sampling fallback: the same file always gives the same transcript
     )
     out_segs, out_words = [], []
     for s in segs:

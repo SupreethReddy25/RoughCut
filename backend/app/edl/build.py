@@ -53,6 +53,9 @@ class Decisions:
     actions: dict[int, str] = field(default_factory=dict)  # unit id -> KEEP|CUT / KEEP|TIGHT_*|REMOVE / KEEP|REMOVE
     zoom: dict[int, str] = field(default_factory=dict)  # speech unit id -> NONE|Z115|Z130
     emphasis: set[int] = field(default_factory=set)  # word ids highlighted in captions (D5)
+    # manual transcript edits that are not decisions (PLAN 6.4): extra word-level cuts / restores.
+    fine_cuts: set[int] = field(default_factory=set)  # word ids cut by a small manual deletion (not learned)
+    restored: set[int] = field(default_factory=set)  # word ids kept although their phrase/filler is cut
 
     def action(self, unit_id: int) -> str:
         return self.actions.get(unit_id, "KEEP")
@@ -79,18 +82,34 @@ def _removed_words(uf: UnitsFile, dec: Decisions) -> tuple[list[bool], set[int]]
     """removed[i] per word, plus the set of word idxs removed *as fillers* (not as part of a cut phrase)."""
     removed = [False] * len(uf.words)
     cut_speech = {u.id for u in uf.units if u.kind == "speech" and dec.action(u.id) == "CUT"}
+    by_unit: dict[int, list[int]] = {}
     for i, w in enumerate(uf.words):
+        by_unit.setdefault(w.unit_id, []).append(i)
         if w.unit_id in cut_speech:
             removed[i] = True
     filler_removed: set[int] = set()
     for u in uf.units:
         if u.kind != "filler" or dec.action(u.id) != "REMOVE" or u.parent_unit_id in cut_speech:
             continue
-        for i, w in enumerate(uf.words):
-            if w.unit_id == u.parent_unit_id and w.is_filler and w.start >= u.start - 1e-3 and w.end <= u.end + 1e-3:
+        for i in by_unit.get(u.parent_unit_id, []):
+            w = uf.words[i]
+            if w.is_filler and w.start >= u.start - 1e-3 and w.end <= u.end + 1e-3:
                 removed[i] = True
                 filler_removed.add(i)
+    for i in dec.fine_cuts:
+        if 0 <= i < len(removed):
+            removed[i] = True
+    for i in dec.restored:
+        if 0 <= i < len(removed):
+            removed[i] = False
+            filler_removed.discard(i)
     return removed, filler_removed
+
+
+def removed_word_ids(uf: UnitsFile, dec: Decisions) -> set[int]:
+    """Ids of the words that are currently cut (by phrase / filler decisions and manual word-level edits)."""
+    removed, _ = _removed_words(uf, dec)
+    return {uf.words[i].id for i, r in enumerate(removed) if r}
 
 
 def _pause_target(p, dec: Decisions) -> float:
@@ -184,12 +203,18 @@ def group_caption_lines(items: list[dict]) -> list[list[dict]]:
 # --------------------------------------------------------------------------- main entry
 def build_edl(uf: UnitsFile, dec: Decisions, face_samples: list[FaceSample] | None = None,
               options: BuildOptions | None = None) -> EDL:
+    return build_edl_with_lines(uf, dec, face_samples, options)[0]
+
+
+def build_edl_with_lines(uf: UnitsFile, dec: Decisions, face_samples: list[FaceSample] | None = None,
+                         options: BuildOptions | None = None) -> tuple[EDL, list[list[int]]]:
+    """Like build_edl, plus the word ids of every caption line (line i of the EDL <-> line_word_ids[i])."""
     opt = options or BuildOptions()
     face_samples = face_samples or []
     removed, filler_removed = _removed_words(uf, dec)
     cuts, kept_idx = _removals(uf, dec, removed, filler_removed, opt.pad)
     kept_words = [uf.words[i] for i in kept_idx]
-    total = max(uf.duration, kept_words[-1].end if kept_words else 0.0)
+    total = uf.duration  # never past the end of the media (a clip beyond the last frame would render short)
     ranges = subtract_ranges((0.0, total), cuts)
 
     zoom_of_unit = {u.id: ZOOM_VALUE[dec.zoom.get(u.id, "NONE")] for u in uf.units if u.kind == "speech"}
@@ -197,7 +222,8 @@ def build_edl(uf: UnitsFile, dec: Decisions, face_samples: list[FaceSample] | No
     # snap clip edges to the output frame grid: ffmpeg's trim works in whole frames, so off-grid edges would
     # make every clip up to one frame longer than the EDL says
     fps = opt.output.fps
-    snapped = [(round(round(a * fps) / fps, 5), round(round(b * fps) / fps, 5)) for a, b in ranges]
+    last_frame = int(total * fps + 1e-6)
+    snapped = [(round(round(a * fps) / fps, 5), round(min(round(b * fps), last_frame) / fps, 5)) for a, b in ranges]
     ranges = [(a, b) for a, b in snapped if b > a]
 
     units_by_kind = {k: [u for u in uf.units if u.kind == k] for k in ("speech", "pause", "filler")}
@@ -220,21 +246,23 @@ def build_edl(uf: UnitsFile, dec: Decisions, face_samples: list[FaceSample] | No
     for w in kept_words:
         o0 = remap.src_to_out(w.start, "next")
         o1 = max(remap.src_to_out(w.end, "prev"), o0 + 0.02)
-        items.append({"raw": w.text_display, "text": _display(w.text_display) or w.text_display,
+        items.append({"id": w.id, "raw": w.text_display, "text": _display(w.text_display) or w.text_display,
                       "t0": _r(o0), "t1": _r(o1), "emph": w.id in dec.emphasis})
-    lines = []
+    lines, line_ids = [], []
     for grp in group_caption_lines(items):
+        line_ids.append([g["id"] for g in grp])
         lines.append(CaptionLine(
             t0=grp[0]["t0"], t1=grp[-1]["t1"],
             words=[CaptionWord(t0=g["t0"], t1=g["t1"], text=g["text"], emphasis=g["emph"]) for g in grp]))
 
     out = opt.output.model_copy(update={"speed": opt.speed})
-    return EDL(
+    edl = EDL(
         video_id=uf.video_id, output=out, clips=clips,
         captions=Captions(enabled=opt.captions_enabled, style_id=opt.caption_style,
                           position=opt.caption_position, lines=lines),  # type: ignore[arg-type]
         texts=list(opt.texts), audio=opt.audio, duration=_r(remap.duration),
     )
+    return edl, line_ids
 
 
 # --------------------------------------------------------------------------- loading processed data

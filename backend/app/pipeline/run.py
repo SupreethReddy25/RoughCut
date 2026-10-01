@@ -49,12 +49,17 @@ def run_pipeline(inputs: list[str | Path], video_id: str | None = None, video_ty
     tr = transcribe.transcribe(ing.wav, model_size=whisper_model)
     (out / "transcript.json").write_text(json.dumps(tr, indent=1, ensure_ascii=False), encoding="utf-8")
     step("transcribe", t0, f"{len(tr['words'])} words")
+    if not tr["words"]:
+        progress("warning: no speech detected - the video has nothing to edit")
 
     t0 = time.time()
     words = transcribe.words_from_transcript(tr)
     en = pauses.energy_from_wav(ing.wav)
     pauses.refine_word_edges(words, en)
     segment.clamp_to_takes(words, take_bounds)
+    for w in words:  # Whisper can place the last word slightly past the end of the media
+        w.end = min(w.end, ing.duration)
+        w.start = min(w.start, w.end - 0.02)
     spans = segment.segment_speech(words, take_bounds)
     groups = fillers.find_fillers(words, spans)
     pause_spans = pauses.build_pause_spans(words, spans, take_bounds)

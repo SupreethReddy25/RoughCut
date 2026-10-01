@@ -202,3 +202,21 @@ def test_take_boundary_pause_removal_joins_clips():
     assert tb.features["is_take_boundary"] == 1
     edl = build_edl(uf, Decisions(actions={tb.id: "REMOVE"}))
     assert len(edl.clips) == 2 and edl.clips[1].src_start - edl.clips[0].src_end > 0.5
+
+
+# ---------------------------------------------------------------- regressions
+def test_clips_never_run_past_the_end_of_the_media():
+    """Whisper can end the last word past the real end of the file; a clip beyond the last frame renders short."""
+    uf, w = make_units([("one two three four", 0.5), ("five six seven eight", 0.5)])
+    uf.duration = w[-1].end + 0.01  # media ends right after the last word: the 40 ms pad would overshoot
+    edl = build_edl(uf, Decisions())
+    assert edl.clips[-1].src_end <= int(uf.duration * FPS) / FPS + 1e-9
+    assert edl.duration == pytest.approx(clip_len(edl), abs=1e-3)
+
+
+def test_empty_program_is_handled():
+    uf, _ = make_units([("one two three four", 0.5)])
+    edl = build_edl(uf, Decisions(actions={ids(uf, "speech")[0]: "CUT"}))
+    assert edl.clips == [] and edl.duration == 0.0 and edl.captions.lines == []
+    with pytest.raises(ValueError):
+        Remap([]).out_to_src(0.0)

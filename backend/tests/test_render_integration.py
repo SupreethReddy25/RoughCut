@@ -49,8 +49,13 @@ def probe_video(path):
 def test_rule_based_render(name, processed, tmp_path):
     d = processed(name)
     uf, faces, wf = load_processed(d)
-    edl = build_edl(uf, rule_decisions(uf, wf), faces, BuildOptions(caption_style="bold_pop"))
+    dec = rule_decisions(uf, wf)  # the rule policy never zooms: add punch-ins so the zoom/crop path is rendered too
+    kept = [u.id for u in uf.units if u.kind == "speech" and dec.action(u.id) != "CUT"]
+    for k, uid in enumerate(kept):
+        dec.zoom[uid] = ("NONE", "Z115", "Z130")[k % 3]
+    edl = build_edl(uf, dec, faces, BuildOptions(caption_style="bold_pop"))
     assert edl.clips and edl.captions.lines
+    assert {c.zoom for c in edl.clips} >= {1.0, 1.15, 1.3}
     out = tmp_path / "out.mp4"
     res = render(edl, d / "source.mp4", out, tmp_path / "out.srt", progress=lambda *_: None)
 

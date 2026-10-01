@@ -44,6 +44,14 @@ def loudnorm_pass2(m: dict, target: float = TARGET_I) -> str:
             f"offset={m['target_offset']}:linear=true:print_format=summary")
 
 
+def is_silent(m: dict) -> bool:
+    """loudnorm reports -inf for audio with no measurable energy."""
+    try:
+        return not (float(m["input_i"]) > -70.0)
+    except (KeyError, ValueError):
+        return True
+
+
 def parse_loudnorm_json(stderr: str) -> dict:
     """The JSON block loudnorm prints at the end of pass 1."""
     blocks = re.findall(r"\{[^{}]*\"input_i\"[^{}]*\}", stderr, re.DOTALL)

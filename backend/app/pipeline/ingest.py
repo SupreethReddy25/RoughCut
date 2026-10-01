@@ -30,6 +30,7 @@ class ProbeInfo:
     fps: float
     has_audio: bool
     rotation: int = 0
+    nb_frames: int | None = None  # video frames, from the container header (exact for our CFR mp4s)
 
 
 @dataclass
@@ -88,7 +89,11 @@ def probe(path: str | Path) -> ProbeInfo:
         durs = [float(info["format"]["duration"])]
     if not durs:
         raise ValueError(f"{path}: cannot determine duration")
-    return ProbeInfo(path, w, h, max(durs), _frac(vs.get("avg_frame_rate", "0/1")), aus is not None, rot)
+    try:
+        nb = int(vs["nb_frames"])
+    except (KeyError, ValueError):
+        nb = None
+    return ProbeInfo(path, w, h, max(durs), _frac(vs.get("avg_frame_rate", "0/1")), aus is not None, rot, nb)
 
 
 def _even(x: int) -> int:
@@ -158,4 +163,7 @@ def ingest(inputs: list[str | Path], out_dir: str | Path) -> IngestResult:
     wav = out_dir / "audio.wav"
     _run([config.ffmpeg_path(), "-y", "-hide_banner", "-loglevel", "error", "-i", str(source), "-vn",
           "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(wav)])
-    return IngestResult(source, proxy, wav, final.duration, W, H, smap)
+    # source.mp4 is CFR 30 fps, so its length is its frame count / 30 (stream/container durations can overshoot by
+    # a few frames, and a clip trimmed past the last real frame would render short)
+    duration = round(final.nb_frames / FPS, 4) if final.nb_frames else final.duration
+    return IngestResult(source, proxy, wav, duration, W, H, smap)

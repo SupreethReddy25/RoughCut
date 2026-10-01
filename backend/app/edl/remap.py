@@ -85,6 +85,8 @@ class Remap:
 
     def out_to_src(self, o: float) -> float:
         """Source time of output time o (clamped to the program)."""
+        if not self.ranges:
+            raise ValueError("empty program: no kept ranges")
         x = min(max(o * self.speed, 0.0), self._total)
         k = max(0, bisect.bisect_right(self._offsets, x + EPS) - 1)
         a, b = self.ranges[k]

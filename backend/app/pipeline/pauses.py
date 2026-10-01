@@ -77,17 +77,22 @@ def load_wav(path) -> tuple[np.ndarray, int]:
     return x, sr
 
 
-def energy_from_samples(x: np.ndarray, sr: int, frame_s: float = FRAME_S) -> Energy:
-    n = round(sr * frame_s)
-    nf = len(x) // n
-    fr = x[: nf * n].reshape(nf, n).astype(np.float64)
-    rms = np.sqrt((fr ** 2).mean(axis=1))
+def energy_from_rms(rms: np.ndarray, frame_s: float = FRAME_S) -> Energy:
+    """Energy track from per-frame linear RMS (silence threshold from the per-video percentiles)."""
+    rms = np.asarray(rms, dtype=np.float64)
     db = np.maximum(20 * np.log10(rms + 1e-9), DB_FLOOR)
-    if nf == 0:
+    if len(rms) == 0:
         return Energy(rms.astype(np.float32), db, frame_s, THR_MIN_DB, DB_FLOOR, DB_FLOOR + 40)
     lo, hi = float(np.percentile(db, 10)), float(np.percentile(db, 90))
     thr = max(lo + THR_FRAC * (hi - lo), lo + 6.0, THR_MIN_DB)
     return Energy(rms.astype(np.float32), db, frame_s, thr, lo, hi)
+
+
+def energy_from_samples(x: np.ndarray, sr: int, frame_s: float = FRAME_S) -> Energy:
+    n = round(sr * frame_s)
+    nf = len(x) // n
+    fr = x[: nf * n].reshape(nf, n).astype(np.float64)
+    return energy_from_rms(np.sqrt((fr ** 2).mean(axis=1)) if nf else np.zeros(0), frame_s)
 
 
 def energy_from_wav(path) -> Energy:

@@ -34,6 +34,11 @@ def render(edl: EDL, source: str | Path, out_mp4: str | Path, out_srt: str | Pat
     """Render the EDL. Returns {duration, loudness{I,LRA,TP}, denoise, loudnorm_pass1}."""
     source, out_mp4 = Path(source), Path(out_mp4)
     info = probe(source)
+    if not edl.clips:
+        raise ValueError("the EDL has no clips: nothing is kept (is there speech in the video?)")
+    src_len = info.nb_frames / (info.fps or edl.output.fps) if info.nb_frames else info.duration
+    if max(c.src_end for c in edl.clips) > src_len + 1e-3:
+        raise ValueError(f"EDL clips run to {max(c.src_end for c in edl.clips):.3f}s but the source is only {src_len:.3f}s")
     src = SourceInfo(info.width, info.height)
     t0 = time.time()
     with tempfile.TemporaryDirectory(prefix="roughcut_render_") as td:
@@ -63,7 +68,11 @@ def render(edl: EDL, source: str | Path, out_mp4: str | Path, out_srt: str | Pat
             stats = audio.parse_loudnorm_json(p1.stderr)
             progress(f"loudnorm pass 1: measured {stats['input_i']} LUFS, TP {stats['input_tp']}, "
                      f"LRA {stats['input_lra']}  (denoise={'on' if use_denoise else 'off'})")
-            chain = pre + [audio.loudnorm_pass2(stats, edl.audio.target_lufs), "aresample=48000"]
+            if audio.is_silent(stats):  # digital silence: loudnorm has nothing to measure (-inf LUFS)
+                progress("audio is silent: skipping loudness normalisation")
+                chain = pre
+            else:
+                chain = pre + [audio.loudnorm_pass2(stats, edl.audio.target_lufs), "aresample=48000"]
 
         graph, vlabel, alabel = build_filter_complex(edl, src, ass_path=ass_path, fonts_dir=FONTS_DIR,
                                                      audio_chain=chain, video=True)
@@ -100,7 +109,10 @@ def main(argv: list[str] | None = None) -> None:
     source = Path(a.source) if a.source else config.PROCESSED_DIR / edl.video_id / "source.mp4"
     out = Path(a.out) if a.out else edl_path.with_name("out.mp4")
     srt = Path(a.srt) if a.srt else out.with_suffix(".srt")
-    render(edl, source, out, srt, denoise=a.denoise, preset=a.preset)
+    try:
+        render(edl, source, out, srt, denoise=a.denoise, preset=a.preset)
+    except (ValueError, RuntimeError) as e:
+        raise SystemExit(f"render failed: {e}") from None
 
 
 if __name__ == "__main__":

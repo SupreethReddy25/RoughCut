@@ -22,6 +22,8 @@ cd frontend; npm run typecheck; npm run build
 backend\.venv\Scripts\python.exe -m app.pipeline.run data\raw\clip_01_main.mp4 --type vlog
 backend\.venv\Scripts\python.exe -m app.edl.run clip_01_main
 backend\.venv\Scripts\python.exe -m app.render.run data\processed\clip_01_main\edl.json --out reports\demo.mp4
+# simulator experiments -> reports/figures/ (E1: learning curves, E3: cross-persona, E4: drift)
+cd backend; .\.venv\Scripts\python.exe -m sim.experiments.e1; .\.venv\Scripts\python.exe -m sim.experiments.e3; .\.venv\Scripts\python.exe -m sim.experiments.e4
 # regenerate placeholder test clips into data/raw
 backend\.venv\Scripts\python.exe scripts\make_test_clips.py
 ```

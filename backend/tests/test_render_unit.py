@@ -179,3 +179,20 @@ def test_audio_chain_and_loudnorm_helpers():
     assert "print_format=json" in audio.loudnorm_pass1()
     with pytest.raises(RuntimeError):
         audio.parse_loudnorm_json("nothing here")
+
+
+def test_render_rejects_empty_and_overlong_edls(tmp_path):
+    import subprocess
+
+    from app import config
+    from app.render.run import render
+
+    src = tmp_path / "s.mp4"  # 2 s, 30 fps test pattern with silent audio
+    subprocess.run([config.ffmpeg_path(), "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=s=320x180:r=30:d=2",
+                    "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", "2", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", str(src)], check=True)
+    with pytest.raises(ValueError, match="no clips"):
+        render(EDL(video_id="v"), src, tmp_path / "o.mp4", progress=lambda *_: None)
+    long_edl = mk_edl(clips=[Clip(src_start=0.0, src_end=3.0)])
+    with pytest.raises(ValueError, match="only 2"):
+        render(long_edl, src, tmp_path / "o.mp4", progress=lambda *_: None)
