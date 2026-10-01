@@ -1,0 +1,9 @@
+{
+  "_doc": "Export presets (PLAN 8.5). All platforms take 1080x1920 @ 30 fps H.264 High, AAC 48 kHz. max_duration_s is a WARNING threshold only (a longer video still exports). safe_zones are fractions of the frame the platform UI covers (used by the preview overlay).",
+  "reels": {"label": "Instagram Reels", "width": 1080, "height": 1920, "fps": 30, "crf": 20, "audio_kbps": 192, "max_duration_s": 180,
+            "safe_zones": {"top": 0.12, "bottom": 0.22, "right": 0.14}},
+  "shorts": {"label": "YouTube Shorts", "width": 1080, "height": 1920, "fps": 30, "crf": 20, "audio_kbps": 192, "max_duration_s": 180,
+             "safe_zones": {"top": 0.10, "bottom": 0.24, "right": 0.15}},
+  "tiktok": {"label": "TikTok", "width": 1080, "height": 1920, "fps": 30, "crf": 20, "audio_kbps": 192, "max_duration_s": 600,
+             "safe_zones": {"top": 0.12, "bottom": 0.25, "right": 0.16}}
+}

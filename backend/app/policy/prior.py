@@ -116,3 +116,23 @@ class StyleMixture:
             w = np.array(list(self.weights().values()))
             self._mean = Prior.mix(self.priors, w)
         return self._mean
+
+
+# --------------------------------------------------------------------------- shipped priors (assets/priors)
+def load_shipped_priors(directory=None) -> tuple[Prior, dict[str, Prior]] | None:
+    """(pooled generic prior, {style name: prototype}) from assets/priors, or None if they were not built.
+
+    Built by scripts/build_prototypes.py from the persona simulator; see PLAN 7.2.
+    """
+    import json
+    from pathlib import Path
+
+    from app import config
+
+    d = Path(directory) if directory else config.ASSETS_DIR / "priors"
+    try:
+        generic = Prior.from_dict(json.loads((d / "generic.json").read_text(encoding="utf-8")))
+        protos = json.loads((d / "prototypes.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return generic, {name: Prior.from_dict(w) for name, w in protos.items()}

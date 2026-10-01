@@ -22,7 +22,7 @@ class PolicyStore:
         stem = f"user{user_id}_{name}"
         return self.root / f"{stem}.npz", self.root / f"{stem}.json"
 
-    def save(self, user_id: int | str, policy: Policy, n_events: int | None = None) -> None:
+    def save(self, user_id: int | str, policy: Policy, n_events: int | None = None, extra: dict | None = None) -> None:
         state = policy.state_dict()
         arrays: dict[str, np.ndarray] = {}
         for k, v in state.get("models", {}).items():
@@ -33,20 +33,24 @@ class PolicyStore:
         np.savez_compressed(npz, **arrays)
         info = dict(state.get("meta", {}))
         info.update({"policy": policy.name, "version": policy.version, "has": ["prior"] if "prior" in state else [],
-                     "n_events": policy.n_updates if n_events is None else n_events})
+                     "n_events": policy.n_updates if n_events is None else n_events, "extra": extra or {}})
         meta.write_text(json.dumps(info), encoding="utf-8")
 
     def meta(self, user_id: int | str, name: str) -> dict | None:
         _, meta = self._paths(user_id, name)
         return json.loads(meta.read_text(encoding="utf-8")) if meta.exists() else None
 
-    def load_into(self, user_id: int | str, policy: Policy, n_events: int | None = None) -> bool:
-        """Restore into `policy`. Returns False (caller should recompute from the log) if absent or stale."""
+    def load_into(self, user_id: int | str, policy: Policy, n_events: int | None = None,
+                  expect: dict | None = None) -> bool:
+        """Restore into `policy`. Returns False (caller should recompute from the log) if absent or stale.
+        `expect` is compared with the `extra` saved alongside (e.g. a fingerprint of the event log)."""
         npz, _ = self._paths(user_id, policy.name)
         info = self.meta(user_id, policy.name)
         if info is None or not npz.exists():
             return False
         if info.get("version") != policy.version or (n_events is not None and info.get("n_events") != n_events):
+            return False
+        if expect is not None and info.get("extra") != expect:
             return False
         data = np.load(npz)
         models: dict[str, dict] = {}

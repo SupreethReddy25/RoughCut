@@ -47,6 +47,7 @@ class SuggestionSet:
     items: list[Item]
     decisions: Decisions
     skipped_fillers: list[int]  # filler units with no clean gap: default KEEP, no suggestion (PLAN 12)
+    mean_best: list[str] = field(default_factory=list)  # per suggestion: the posterior-mean argmax when it was made
 
 
 class EditSession:
@@ -193,10 +194,13 @@ def suggest(uf: UnitsFile, word_feats: dict[int, dict[str, float]] | None, polic
             source: str = "policy") -> SuggestionSet:
     """Run `policy` over the whole video (every proposal is applied), returning suggestions + decisions."""
     sess = EditSession(uf, word_feats, video_type)
-    sugs, items = [], []
+    sugs, items, best = [], [], []
     for item in sess.items():
-        choice = policy.choose(item.decision_type, item.ctx, (offsets or {}).get(item.decision_type))
+        off = (offsets or {}).get(item.decision_type)
+        choice = policy.choose(item.decision_type, item.ctx, off)
+        scores = policy.mean_scores(item.decision_type, item.ctx)
+        best.append(max(scores, key=lambda a: scores[a]))
         sugs.append(make_suggestion(item, choice, policy, uf.video_id, source))
         items.append(item)
         sess.commit(item, choice.action)
-    return SuggestionSet(sugs, items, sess.decisions, sess.skipped_fillers)
+    return SuggestionSet(sugs, items, sess.decisions, sess.skipped_fillers, best)

@@ -27,3 +27,8 @@ cd backend; .\.venv\Scripts\python.exe -m sim.experiments.e1; .\.venv\Scripts\py
 # regenerate placeholder test clips into data/raw
 backend\.venv\Scripts\python.exe scripts\make_test_clips.py
 ```
+
+## Backend API (Phase 3)
+- App factory `app.main:create_app` (context = DB + jobs + per-user policies, built at startup); data under `data/` (db.sqlite, processed/, uploads/, exports/, policies/).
+- Shipped priors live in `backend/assets/priors` (rebuild: `python backend/scripts/build_prototypes.py`). Product bandit settings (lambda, style sigma) are in `app/appctx.py`.
+- The event log is the source of truth: edit state, EDL and policy are recomputed from it (`app/state.py`, `app/policy/log_replay.py`).

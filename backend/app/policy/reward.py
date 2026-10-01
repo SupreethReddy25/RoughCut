@@ -102,7 +102,7 @@ class Mapping:
     target_id: int | None = None
     final_action: str | None = None
     word_ids: list[int] = field(default_factory=list)
-    word_id: int | None = None  # emphasis override: the word that gets highlighted (None = clear)
+    word_id: int | None = None  # emphasis: the word that gets highlighted (None = clear)
     op: str = "cut"  # fine_cut: "cut" | "restore"
     note: str = ""
 
@@ -126,7 +126,7 @@ def _dur(words) -> float:
     return sum(w.end - w.start for w in words)
 
 
-def _filler_word_ids(uf: UnitsFile, fu) -> set[int]:
+def filler_word_ids(uf: UnitsFile, fu) -> set[int]:
     return {w.id for w in uf.words if w.unit_id == fu.parent_unit_id and w.is_filler
             and w.start >= fu.start - 1e-3 and w.end <= fu.end + 1e-3}
 
@@ -171,7 +171,7 @@ def classify_manual_edit(edit: ManualEdit, uf: UnitsFile, dec: Decisions) -> lis
                 out.append(Mapping("override", "phrase", uid, "KEEP", [w.id for w in mine], note="restore >=70%"))
                 continue
             for fu in fillers.get(uid, []):
-                fw = _filler_word_ids(uf, fu)
+                fw = filler_word_ids(uf, fu)
                 if not fw & changed:
                     continue
                 if deleting and fw <= (now | changed) and not fw <= now and dec.action(fu.id) != "REMOVE" and not cut:
@@ -208,7 +208,7 @@ def classify_manual_edit(edit: ManualEdit, uf: UnitsFile, dec: Decisions) -> lis
             k = edit.candidate_word_ids.index(edit.word_id)
             return [Mapping("override", "emphasis", edit.line_idx, f"CAND_{k}", list(edit.line_word_ids),
                             word_id=edit.word_id)]
-        return [Mapping("edit_only", "emphasis", edit.line_idx, None, [edit.word_id],
+        return [Mapping("edit_only", "emphasis", edit.line_idx, None, list(edit.line_word_ids), word_id=edit.word_id,
                         note="emphasised word is not one of the line's candidates: applied, not learned")]
     raise ValueError(f"unknown manual edit kind {edit.kind!r}")
 
@@ -231,6 +231,10 @@ def apply_mapping(dec: Decisions, m: Mapping, uf: UnitsFile) -> None:
             elif m.decision_type == "filler":
                 dec.fine_cuts -= set(m.word_ids)
                 dec.restored -= set(m.word_ids)
+    elif m.kind == "edit_only" and m.decision_type == "emphasis":  # applied to the captions, not learned
+        dec.emphasis -= set(m.word_ids)
+        if m.word_id is not None:
+            dec.emphasis.add(m.word_id)
     elif m.kind == "fine_cut":
         ids = set(m.word_ids)
         if m.op == "cut":

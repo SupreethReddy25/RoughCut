@@ -56,6 +56,9 @@ class Decisions:
     # manual transcript edits that are not decisions (PLAN 6.4): extra word-level cuts / restores.
     fine_cuts: set[int] = field(default_factory=set)  # word ids cut by a small manual deletion (not learned)
     restored: set[int] = field(default_factory=set)  # word ids kept although their phrase/filler is cut
+    # edit-only manual changes (PLAN 6.4): never learned, but they shape the EDL
+    caption_text: dict[int, str] = field(default_factory=dict)  # word id -> corrected caption text
+    crop: dict[int, tuple[float, float]] = field(default_factory=dict)  # first speech unit of a clip -> crop centre
 
     def action(self, unit_id: int) -> str:
         return self.actions.get(unit_id, "KEEP")
@@ -238,6 +241,8 @@ def build_edl_with_lines(uf: UnitsFile, dec: Decisions, face_samples: list[FaceS
                 if dec.action(u.id) == "KEEP" and u.start >= a - 1e-6 and u.end <= b + 1e-6]
         c = _median_center(face_samples, a, b) or last_center
         last_center = c
+        if sp_ids and sp_ids[0] in dec.crop:  # manual crop drag for the clip that starts with this phrase
+            c = dec.crop[sp_ids[0]]
         clips.append(Clip(src_start=a, src_end=b, zoom=zoom_of_unit.get(sp_ids[0], 1.0) if sp_ids else 1.0,
                           crop_center=Point(x=round(c[0], 4), y=round(c[1], 4)), unit_ids=sorted(ids)))
 
@@ -246,7 +251,9 @@ def build_edl_with_lines(uf: UnitsFile, dec: Decisions, face_samples: list[FaceS
     for w in kept_words:
         o0 = remap.src_to_out(w.start, "next")
         o1 = max(remap.src_to_out(w.end, "prev"), o0 + 0.02)
-        items.append({"id": w.id, "raw": w.text_display, "text": _display(w.text_display) or w.text_display,
+        shown = dec.caption_text.get(w.id, w.text_display)
+        items.append({"id": w.id, "raw": w.text_display, "text": shown.strip() if w.id in dec.caption_text
+                      else (_display(shown) or shown),
                       "t0": _r(o0), "t1": _r(o1), "emph": w.id in dec.emphasis})
     lines, line_ids = [], []
     for grp in group_caption_lines(items):

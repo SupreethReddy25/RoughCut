@@ -41,7 +41,10 @@ class Learner:
         if ev.undone or ev.kind not in LEARNED_KINDS:
             return []
         arms = list(sug.candidates) or None
-        return self.apply(sug.decision_type, sug.context_raw, sug.proposed_action, ev.kind,
+        # a user who changes their mind twice moves FROM the action currently in the edit, not from the original
+        # proposal: the API records that action as `from_action` whenever it differs
+        proposed = ev.payload.get("from_action") or sug.proposed_action
+        return self.apply(sug.decision_type, sug.context_raw, proposed, ev.kind,
                           ev.payload.get("final_action"), arms, manual=ev.payload.get("via") == "manual")
 
 

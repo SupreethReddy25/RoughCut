@@ -30,7 +30,7 @@ def _ffmpeg(args: list[str]) -> subprocess.CompletedProcess:
 
 
 def render(edl: EDL, source: str | Path, out_mp4: str | Path, out_srt: str | Path | None = None, *,
-           denoise: str = "auto", preset: str = "fast", progress=print) -> dict:
+           denoise: str = "auto", preset: str = "fast", crf: int = 20, audio_kbps: int = 192, progress=print) -> dict:
     """Render the EDL. Returns {duration, loudness{I,LRA,TP}, denoise, loudnorm_pass1}."""
     source, out_mp4 = Path(source), Path(out_mp4)
     info = probe(source)
@@ -80,12 +80,12 @@ def render(edl: EDL, source: str | Path, out_mp4: str | Path, out_srt: str | Pat
         out_mp4.parent.mkdir(parents=True, exist_ok=True)
         _ffmpeg(["-i", str(source), "-/filter_complex", str(td / "graph.txt"),
                  "-map", f"[{vlabel}]", "-map", f"[{alabel}]",
-                 "-c:v", "libx264", "-preset", preset, "-crf", "20", "-profile:v", "high", "-pix_fmt", "yuv420p",
-                 "-r", str(edl.output.fps), "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+                 "-c:v", "libx264", "-preset", preset, "-crf", str(crf), "-profile:v", "high", "-pix_fmt", "yuv420p",
+                 "-r", str(edl.output.fps), "-c:a", "aac", "-b:a", f"{audio_kbps}k", "-ar", "48000",
                  "-t", f"{edl.duration:.3f}",  # AAC padding would otherwise make the container ~0.1 s longer
                  "-movflags", "+faststart", str(out_mp4)])
     if out_srt:
-        Path(out_srt).write_text(build_srt(edl), encoding="utf-8")
+        Path(out_srt).write_text(build_srt(edl), encoding="utf-8", newline="\n")  # same bytes on every OS
     dur = probe(out_mp4).duration
     loud = audio.measure_loudness(out_mp4)
     progress(f"rendered {out_mp4} in {time.time() - t0:.1f}s: duration {dur:.3f}s (EDL {edl.duration:.3f}s), "
