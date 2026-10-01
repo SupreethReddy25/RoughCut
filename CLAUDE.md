@@ -18,6 +18,10 @@ cd backend; .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 cd frontend; npm run dev
 # frontend typecheck / build
 cd frontend; npm run typecheck; npm run build
+# analysis -> data/processed/{id}/ ; rule-based EDL -> edl.json ; render -> out.mp4 + out.srt
+backend\.venv\Scripts\python.exe -m app.pipeline.run data\raw\clip_01_main.mp4 --type vlog
+backend\.venv\Scripts\python.exe -m app.edl.run clip_01_main
+backend\.venv\Scripts\python.exe -m app.render.run data\processed\clip_01_main\edl.json --out reports\demo.mp4
 # regenerate placeholder test clips into data/raw
 backend\.venv\Scripts\python.exe scripts\make_test_clips.py
 ```

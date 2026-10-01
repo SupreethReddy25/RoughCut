@@ -1,0 +1,20 @@
+{
+  "_doc": "Text-overlay presets. Sizes are px at 1080x1920. positions = vertical centre as a fraction of frame height (position 'custom' uses the overlay's own y).",
+  "positions": {"top": 0.13, "center": 0.4},
+  "styles": {
+    "title": {
+      "font": "Montserrat ExtraBold", "font_file": "Montserrat-ExtraBold.ttf", "size": 84, "case": "upper",
+      "color": "#FFFFFF", "outline_color": "#000000", "outline": 9, "shadow": 0, "max_width": 900
+    },
+    "label": {
+      "font": "Inter SemiBold", "font_file": "Inter-SemiBold.ttf", "size": 48, "case": "none",
+      "color": "#FFFFFF", "outline_color": "#000000", "outline": 0, "shadow": 0,
+      "box": {"color": "#000000", "opacity": 0.6, "padding": 20}, "max_width": 860
+    },
+    "callout": {
+      "font": "Montserrat ExtraBold", "font_file": "Montserrat-ExtraBold.ttf", "size": 64, "case": "none",
+      "color": "#101010", "outline_color": "#FFD60A", "outline": 0, "shadow": 0,
+      "box": {"color": "#FFD60A", "opacity": 1.0, "padding": 24}, "max_width": 860
+    }
+  }
+}

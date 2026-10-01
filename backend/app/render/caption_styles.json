@@ -1,0 +1,30 @@
+{
+  "_doc": "Sizes are px at 1080x1920. The browser preview scales them by container_width/1080. positions = vertical centre of the caption block as a fraction of frame height.",
+  "positions": {"lower_third": 0.68, "center": 0.5, "top": 0.14},
+  "styles": {
+    "bold_pop": {
+      "label": "Bold Pop", "mode": "pop",
+      "font": "Montserrat ExtraBold", "font_file": "Montserrat-ExtraBold.ttf", "size": 78, "case": "upper",
+      "color": "#FFFFFF", "emphasis_color": "#FFD60A", "outline_color": "#000000", "outline": 9, "shadow": 0,
+      "active_scale": 1.1, "max_width": 900
+    },
+    "clean": {
+      "label": "Clean", "mode": "line",
+      "font": "Inter SemiBold", "font_file": "Inter-SemiBold.ttf", "size": 56, "case": "none",
+      "color": "#FFFFFF", "emphasis_color": "#FFD60A", "outline_color": "#000000", "outline": 0, "shadow": 0,
+      "box": {"color": "#000000", "opacity": 0.55, "padding": 22}, "max_width": 880
+    },
+    "karaoke": {
+      "label": "Karaoke", "mode": "karaoke",
+      "font": "Montserrat ExtraBold", "font_file": "Montserrat-ExtraBold.ttf", "size": 70, "case": "upper",
+      "color": "#FFFFFF", "fill_color": "#FFD60A", "emphasis_color": "#FFD60A", "outline_color": "#000000",
+      "outline": 8, "shadow": 0, "max_width": 900
+    },
+    "minimal": {
+      "label": "Minimal", "mode": "line",
+      "font": "Inter SemiBold", "font_file": "Inter-SemiBold.ttf", "size": 44, "case": "lower",
+      "color": "#FFFFFF", "emphasis_color": "#FFFFFF", "outline_color": "#000000", "outline": 0, "shadow": 3,
+      "max_width": 860
+    }
+  }
+}
