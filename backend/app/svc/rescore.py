@@ -72,6 +72,8 @@ def rescore(session: Session, b: Bundle, learner: Learner, event_id: int, nudge:
             continue  # the user has already looked at it: don't move things under their eyes
         ctx, dt = s.context_raw_json, s.decision_type
         off = offsets.get(dt)
+        if dt == "phrase" and ctx.get("crew_score", 0.0) >= 0.5 and not nudge:
+            continue  # cut for what was said, which feedback on other lines says nothing about
         if dt == "hook" or (dt == "rhythm" and not nudge):
             continue  # those agents plan for the whole video: only a nudge moves a beat
         if dt == "rhythm":  # the nudge decides between beats, with the current one slightly favoured

@@ -30,6 +30,7 @@ const POLL_MS = 800;
 export function ExportDialog({ projectId, styles, defaultPreset, onBeforeRender, onRendered, onRate, rating, onClose }: Props) {
   const [preset, setPreset] = useState(defaultPreset);
   const [phase, setPhase] = useState<Phase>({ name: "idle" });
+  const [picked, setPicked] = useState<number | null>(rating ?? null);
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
@@ -140,7 +141,7 @@ export function ExportDialog({ projectId, styles, defaultPreset, onBeforeRender,
                 <p className="mb-1.5 text-xs text-neutral-400">How does this edit feel? It teaches your agent the rhythm you like.</p>
                 <div className="flex gap-1.5">
                   {([[1, "👍", "Great"], [0, "😐", "Okay"], [-1, "👎", "Not me"]] as const).map(([v, icon, label]) => (
-                    <button key={v} type="button" aria-pressed={rating === v} onClick={() => onRate(v)} className={`rc-press flex-1 rounded-md px-2 py-1.5 text-sm ring-1 ${rating === v ? "bg-sky-500/25 text-sky-100 ring-sky-400/50" : "bg-white/[0.04] text-neutral-300 ring-white/10 hover:bg-white/[0.08]"}`}>
+                    <button key={v} type="button" aria-pressed={picked === v} onClick={() => { setPicked(v); onRate(v); }} className={`rc-press flex-1 rounded-md px-2 py-1.5 text-sm ring-1 ${picked === v ? "bg-sky-500/25 text-sky-100 ring-sky-400/50" : "bg-white/[0.04] text-neutral-300 ring-white/10 hover:bg-white/[0.08]"}`}>
                       <span aria-hidden="true">{icon}</span> {label}
                     </button>
                   ))}

@@ -376,7 +376,7 @@ function Workspace({ api, project }: { api: ProjectApi; project: Ready }) {
           ? "lg:grid-cols-[minmax(0,1.2fr)_minmax(200px,0.8fr)_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)_minmax(0,32vh)]"
           : "lg:grid-cols-[minmax(200px,270px)_minmax(0,1fr)_minmax(290px,340px)] xl:grid-cols-[minmax(240px,320px)_minmax(0,1fr)_minmax(320px,380px)]"
       }`}>
-        {comparing && <ComparePanel ref={compare} projectId={project.id} before={project.duration} after={project.edl.duration} srcTime={time.src} onPlayBoth={playBoth} />}
+        {comparing && <ComparePanel ref={compare} projectId={project.id} before={project.duration} after={project.edl.duration} srcTime={time.src} editPlaying={time.playing} editOut={time.out} onPlayBoth={playBoth} />}
         <div className="flex h-[78vh] min-h-0 flex-col items-center gap-2.5 overflow-y-auto border-white/[0.06] bg-[radial-gradient(80%_60%_at_50%_30%,rgb(111_92_246/0.10),transparent_70%)] p-3 md:h-[64vh] md:border-r lg:h-auto">
           <div className="relative min-h-0 w-full flex-1">
             <PreviewPlayer

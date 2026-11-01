@@ -36,6 +36,7 @@ SWEEPS = 10  # value-iteration sweeps per draw
 N_DRAWS = 16  # extra draws that estimate how likely the acting draw's choice was (propensity, review confidence)
 UNSEEN_WEIGHT = 0.2  # a step nobody looked at carries no reward of its own, only the value of what follows it
 RATING_REWARD = 2.0  # the export rating, on the last step of the episode
+RATING_SHARE = 0.5  # ... plus this much of it on every step: a verdict on the video is partly a verdict on each beat
 MAX_ROWS = 3000
 Q_CLIP = 6.0
 
@@ -44,11 +45,20 @@ def phi(ctx: dict[str, float]) -> np.ndarray:
     """State features of one rhythm decision."""
     since = float(ctx.get("hist_since_visual", SINCE_NEVER))
     last = int(ctx.get("hist_last_visual", LAST_NONE))
+    central = float(ctx.get("topic_centrality", 0.0))
+    bins = [float(since < 2.0), float(2.0 <= since < 4.0), float(4.0 <= since < 7.0), float(7.0 <= since < 12.0), float(since >= 12.0)]
+    kinds = [float(last == LAST_ZOOM), float(last == LAST_TEXT), float(last == LAST_SFX)]
+    # what a creator wants depends on combinations ("only after a quiet stretch AND on an important phrase"), and a
+    # linear model needs them spelled out
+    important = float(central >= 0.45)
+    very = float(central >= 0.55)
     return np.array([
+        *[b * important for b in bins], *[b * very for b in bins[2:]], *[k * float(since >= 3.0) for k in kinds],
+        min(float(ctx.get("hist_beats_per_min", 0.0)), 30.0) / 15.0,
         1.0,
-        float(since < 2.0), float(2.0 <= since < 4.0), float(4.0 <= since < 7.0), float(7.0 <= since < 12.0), float(since >= 12.0),
+        *bins,
         min(since, SINCE_NEVER) / SINCE_NEVER,
-        float(last == LAST_ZOOM), float(last == LAST_TEXT), float(last == LAST_SFX),
+        *kinds,
         min(float(ctx.get("hist_streak", 0.0)), 4.0) / 2.0,
         float(np.clip(ctx.get("loudness_z", 0.0) / 3.0, -2.0, 2.0)),
         min(float(ctx.get("duration", 0.0)), 12.0) / 6.0,
@@ -59,7 +69,7 @@ def phi(ctx: dict[str, float]) -> np.ndarray:
     ])
 
 
-D = 17
+D = 29
 
 
 @cache
@@ -102,10 +112,12 @@ class RhythmAgent:
     name = "rlsvi"
 
     def __init__(self, seed: int = 0, gamma: float = GAMMA, lam: float = LAMBDA, sigma: float = SIGMA, sweeps: int = SWEEPS,
-                 n_draws: int = N_DRAWS, greedy: bool = False):
+                 n_draws: int = N_DRAWS, greedy: bool = False, rating_reward: float = RATING_REWARD,
+                 rating_share: float = RATING_SHARE):
         self.rng = np.random.default_rng(seed)
         self.gamma, self.lam, self.sigma, self.sweeps, self.n_draws = gamma, lam, sigma, sweeps, n_draws
         self.greedy = greedy
+        self.rating_reward, self.rating_share = rating_reward, rating_share
         self.episodes: list[Episode] = []
         self._ready = False
 
@@ -126,7 +138,9 @@ class RhythmAgent:
             xs = [phi(s.ctx) for s in ep.steps]
             for i, s in enumerate(ep.steps):
                 nxt = xs[i + 1] if i + 1 < len(xs) else None
-                last_bonus = RATING_REWARD * ep.rating if ep.rating is not None and nxt is None else 0.0
+                last_bonus = self.rating_reward * ep.rating if ep.rating is not None and nxt is None else 0.0
+                if ep.rating is not None:
+                    last_bonus += self.rating_share * ep.rating
                 if s.reward is None:
                     w = 1.0 if last_bonus else UNSEEN_WEIGHT
                     row(xs[i], s.action, last_bonus, w, nxt)

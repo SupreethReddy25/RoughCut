@@ -325,7 +325,7 @@ def suggest(ctx: AppContext, session: Session, pk: int):
             if b.sug_rows:  # idempotent: the suggestions of a video are made once
                 return state_out(b, learner, message="Suggestions already exist.")
             auto = b.video.autopilot
-            rhythm, hook = _agents(session, uid, pk, auto)
+            rhythm, hook = _agents(session, uid, pk, auto) if ctx.agents else (None, None)
             res = run_suggest(b.analysis.uf, b.analysis.word_feats, learner.policy, video_type=b.video.video_type,
                               source="autopilot" if auto else "policy", greedy=auto,
                               target=b.video.target_duration, seed=pk, rhythm=rhythm, hook=hook)
@@ -403,6 +403,9 @@ def explain_suggestion(ctx: AppContext, session: Session, pk: int, sid: int) -> 
             text = (explain_rhythm(s.context_raw_json, b.action_of(s)) if s.decision_type == "rhythm"
                     else NOT_EXPLAINABLE[s.decision_type])
             return {"suggestion_id": sid, "text": text, "confidence": s.confidence, "reasons": []}
+        if s.decision_type == "phrase" and s.context_raw_json.get("crew_score", 0.0) >= 0.5:
+            return {"suggestion_id": sid, "text": "This sounds like talk to the crew rather than to your viewer, so it was "
+                    "cut. Restore it if it belongs in the video.", "confidence": s.confidence, "reasons": []}
         learner = ctx.policies.get(session, b.video.user_id)
         ex = explain(learner.policy, s.decision_type, s.context_raw_json, s.proposed_action, s.confidence)
     return {"suggestion_id": sid, "text": ex.text, "confidence": s.confidence,

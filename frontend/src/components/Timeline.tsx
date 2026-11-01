@@ -106,6 +106,8 @@ export function Timeline({ project, outTime, playing, selected, selectedText, on
   const ticks: number[] = [];
   for (let t = 0; t <= duration; t += tick) ticks.push(t);
 
+  const needs = new Set(project.queue.needs_review);
+  const attention = project.suggestions.filter((s) => needs.has(s.id)); // the dots point at what asks for a look
   return (
     <div className="border-t border-white/[0.06] bg-neutral-900/70" data-testid="timeline">
       <div className="flex items-center gap-2 px-3 pb-1 pt-1.5 text-[11px] text-neutral-400">
@@ -124,7 +126,7 @@ export function Timeline({ project, outTime, playing, selected, selectedText, on
             </div>
           ))}
           {blocks.map((b) => {
-            const weak = weakestIn(b.unitIds, project.suggestions);
+            const weak = weakestIn(b.unitIds, attention);
             const hasSel = !!selected && project.suggestions.some(
               (s) => s.decision_type === selected.decision_type && s.target_id === selected.target_id && s.unit_id !== null && b.unitIds.includes(s.unit_id),
             );

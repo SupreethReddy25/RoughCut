@@ -31,7 +31,7 @@ def _get_model(size: str, device: str, compute_type: str):
 
 
 def transcribe(wav_path, model_size: str = MODEL_SIZE, device: str = "cpu", compute_type: str = "int8",
-               initial_prompt: str = INITIAL_PROMPT) -> dict:
+               initial_prompt: str = INITIAL_PROMPT, on_text=None) -> dict:
     """Returns {model, language, duration, segments:[{start,end,text}], words:[{start,end,word,probability}]}."""
     model = _get_model(model_size, device, compute_type)
     segs, info = model.transcribe(
@@ -50,6 +50,8 @@ def transcribe(wav_path, model_size: str = MODEL_SIZE, device: str = "cpu", comp
         for w in s.words or []:
             out_words.append({"start": round(w.start, 3), "end": round(w.end, 3), "word": w.word,
                               "probability": round(float(w.probability), 4)})
+        if on_text is not None:  # what has been heard so far (the analysing screen shows it)
+            on_text(s.text.strip(), float(s.end), float(info.duration))
     return {"model": model_size, "language": info.language, "duration": round(info.duration, 3),
             "initial_prompt": initial_prompt, "segments": out_segs, "words": out_words}
 
@@ -67,6 +69,11 @@ def words_from_transcript(tr: dict) -> list[Word]:
             if words and text:  # lone punctuation token: glue onto the previous word
                 words[-1].text_original += text
                 words[-1].text_display += text
+            continue
+        if words and re.match(r"^[,.\-'’]\w", w["word"]):  # "21" + ",000", "5" + "-star": one word
+            words[-1].text_original += text
+            words[-1].text_display += text
+            words[-1].end = prev_end = max(float(w["end"]), prev_end)
             continue
         start = max(float(w["start"]), prev_end)
         end = max(float(w["end"]), start + MIN_WORD_DUR)

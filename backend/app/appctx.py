@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -38,6 +39,8 @@ PRODUCT_LAMBDA = 10.0
 # pause or zoom is cosmetic, so only keep/cut is slowed down.
 PRODUCT_LAMBDA_BY_TYPE = {"phrase": 30.0}
 PRODUCT_EPS_BY_TYPE = {"phrase": 0.0}  # no uniform random keep/cut flips in the product (policy/linear.py)
+PRODUCT_V = 0.15  # less posterior noise and fewer random tries: 0.903 vs 0.892 on unseen seeds, same recovery from drift
+PRODUCT_EPS = 0.005
 STYLE_SIGMA = 0.7  # the style posterior itself (PLAN 7.2): sharp, so a style is identified quickly
 STYLE_PRIOR_SIGMA = 3.0  # ... but the prior mean the bandit starts from follows it softly (see policy/style.py)
 
@@ -102,10 +105,10 @@ class PolicyManager:
         if shipped is not None:
             generic, protos = shipped
             mixture = StyleMixture(protos, generic, sigma=STYLE_SIGMA, prior_sigma=STYLE_PRIOR_SIGMA)
-            return Learner(LinTS(mixture.mean_prior(), lam=PRODUCT_LAMBDA, seed=user_id,
+            return Learner(LinTS(mixture.mean_prior(), lam=PRODUCT_LAMBDA, v=PRODUCT_V, eps_floor=PRODUCT_EPS, seed=user_id,
                                  lam_by_type=PRODUCT_LAMBDA_BY_TYPE, eps_by_type=PRODUCT_EPS_BY_TYPE), mixture)
-        return Learner(LinTS(Prior(), lam=PRODUCT_LAMBDA, seed=user_id, lam_by_type=PRODUCT_LAMBDA_BY_TYPE,
-                             eps_by_type=PRODUCT_EPS_BY_TYPE), None)
+        return Learner(LinTS(Prior(), lam=PRODUCT_LAMBDA, v=PRODUCT_V, eps_floor=PRODUCT_EPS, seed=user_id,
+                             lam_by_type=PRODUCT_LAMBDA_BY_TYPE, eps_by_type=PRODUCT_EPS_BY_TYPE), None)
 
     @staticmethod
     def fingerprint(session: Session, user_id: int) -> tuple[int, int]:
@@ -183,7 +186,7 @@ class PolicyManager:
 
 
 class AppContext:
-    def __init__(self, data_dir: str | Path | None = None, ingest_fn: IngestFn | None = None, workers: int = 2,
+    def __init__(self, data_dir: str | Path | None = None, ingest_fn: IngestFn | None = None, agents: bool | None = None, workers: int = 2,
                  shipped_priors="auto"):
         self.data_dir = Path(data_dir) if data_dir else config.DATA_DIR
         self.processed_dir = self.data_dir / "processed"
@@ -195,6 +198,7 @@ class AppContext:
         self.jobs = JobRunner(workers)
         self.locks = LockMap()
         self.ingest_fn = ingest_fn or default_ingest
+        self.agents = agents if agents is not None else os.environ.get("ROUGHCUT_AGENTS", "1") != "0"
         if ingest_fn is None and config.PRELOAD_MODELS:
             threading.Thread(target=preload_models, name="preload-models", daemon=True).start()
         self.shipped_priors = load_shipped_priors() if shipped_priors == "auto" else shipped_priors

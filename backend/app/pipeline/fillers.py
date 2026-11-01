@@ -112,9 +112,8 @@ def find_fillers(words: list[Word], spans: list[tuple[int, int]]) -> list[Filler
             elif tok == "like":
                 # only a discourse "like" is a filler: set off by commas, opening a phrase, or the quotative "was like".
                 # "looks like", "create it like the other" carry meaning, and cutting them breaks the sentence.
-                discourse = (words[i].text_original.rstrip().endswith(",") or prev_raw.endswith(",") or i == s0
-                             or prev in LIKE_AFTER_BE)
-                if discourse and prev not in VERB_LIKE_PREV:
+                if (prev_raw.endswith(",") or i == s0 or prev in LIKE_AFTER_BE
+                        or (words[i].text_original.rstrip().endswith(",") and prev not in VERB_LIKE_PREV)):
                     g = FillerGroup([i], "like", which[i])
             else:
                 g = FillerGroup([i], tok, which[i])

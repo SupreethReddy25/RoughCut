@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import os
+
+os.environ.setdefault("ROUGHCUT_AGENTS", "0")  # the API tests cover the base decision set; test_agents.py the full one
+
 import pytest
 from fastapi.testclient import TestClient
 

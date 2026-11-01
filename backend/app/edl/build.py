@@ -216,17 +216,25 @@ def group_caption_lines(items: list[dict]) -> list[list[dict]]:
 
 
 # --------------------------------------------------------------------------- rhythm beats and music timing
-def pop_text(words: list[Word]) -> str:
-    """The word(s) a text pop-up shows: a number with what follows it, else the longest word that says something."""
+POP_WEAK = {"inside", "outside", "around", "about", "through", "between", "because", "before", "after", "going", "there", "their",
+            "these", "those", "would", "could", "should", "really", "things", "thing", "something", "video", "videos", "first"}
+
+
+def pop_word(words: list[Word]) -> tuple[str, Word | None]:
+    """What a text pop-up shows and the word it lands on: a number with what follows it, else the longest word that
+    says something. A pop-up with nothing worth showing is left out."""
     from app.pipeline.semantic import STOPWORDS
 
     clean = [(w.text_display.strip().strip(".,;:!?\"'“”…—-"), w) for w in words if not w.is_filler]
     clean = [(t, w) for t, w in clean if t]
-    for k, (t, _) in enumerate(clean):
+    for k, (t, w) in enumerate(clean):
         if any(ch.isdigit() for ch in t):
-            return " ".join(x for x, _ in clean[k:k + 2]).upper()
-    good = [t for t, _ in clean if t.lower() not in STOPWORDS]
-    return max(good or [t for t, _ in clean] or [""], key=len).upper()
+            return " ".join(x for x, _ in clean[k:k + 2]).upper(), w
+    good = [(t, w) for t, w in clean if t.lower() not in STOPWORDS and t.lower() not in POP_WEAK and len(t) >= 4]
+    if not good:
+        return "", None
+    t, w = max(good, key=lambda g: len(g[0]))
+    return t.upper(), w
 
 
 def _first_kept_word(kept_words: list[Word]) -> dict[int, list[Word]]:
@@ -245,10 +253,10 @@ def _pops(uf: UnitsFile, dec: Decisions, kept_words: list[Word], remap: Remap) -
         ws = by_unit.get(uid)
         if action != "TEXT_POP" or not ws:
             continue
-        text = pop_text(ws)
+        text, word = pop_word(ws)
         if not text:
             continue
-        t0 = remap.src_to_out(ws[0].start, "next")
+        t0 = remap.src_to_out(word.start, "next")  # on the word as it is said
         out.append(TextOverlay(id=f"pop_{uid}", text=text, t0=_r(t0), t1=_r(min(t0 + POP_SECONDS, remap.duration)),
                                position="custom", y=POP_Y, style_id="title"))
     return [t for t in out if t.t1 > t.t0]

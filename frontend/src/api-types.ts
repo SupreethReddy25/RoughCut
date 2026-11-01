@@ -126,6 +126,22 @@ export interface AnalysisProgressOut {
   /** the estimate comes from earlier analyses on this computer */
   learned: boolean;
   waiting: boolean;
+  /** what the analysis has really found so far */
+  live?: {
+    peaks?: number[];
+    frame?: boolean;
+    heard?: string[];
+    heard_fraction?: number;
+    n_words?: number;
+    n_phrases?: number;
+    n_pauses?: number;
+    n_fillers?: number;
+    pause_marks?: [number, number][];
+    filler_marks?: number[];
+    filler_words?: string[];
+    face?: { x: number; y: number; seen: number; source_ar: number };
+    keywords?: string[];
+  };
 }
 
 export interface ProjectOut extends ProjectSummary, Omit<StateOut, "status"> {

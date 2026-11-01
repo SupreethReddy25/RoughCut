@@ -144,7 +144,7 @@ def test_music_events_set_change_remove_and_undo(client):
     suggested(client, pk)
     assert get_state(client, pk)["edl"]["audio"]["music"] is None
     s = post_event(client, pk, "music", payload={"track_id": LIB_TRACK, "gain_db": -20, "duck_db": -12})
-    assert s["edl"]["audio"]["music"] == {"track_id": LIB_TRACK, "gain_db": -20.0, "duck_db": -12.0}
+    assert s["edl"]["audio"]["music"] == {"track_id": LIB_TRACK, "gain_db": -20.0, "duck_db": -12.0, "start_s": 0.0}
     assert s["events"][0]["kind"] == "music" and s["events"][0]["reward"] is None  # edit-only: nothing learned
     same = post_event(client, pk, "music", payload={"track_id": LIB_TRACK, "gain_db": -20, "duck_db": -12})
     assert same["events"] == [] and "No change" in same["message"]

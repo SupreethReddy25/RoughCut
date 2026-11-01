@@ -35,7 +35,8 @@ creators: no human study (E11/E12 in PLAN) has been run, so do not claim one.
 | E9 off-policy | True acceptance of learned LinTS 0.932 (SNDR estimate 0.944), rule 0.749 (0.739), generic 0.703 (0.697). DR's 95% interval covers the truth 89% of the time. |
 | E10 wrong model | Creators outside the model family and the prior's training data, keep/cut + pause + filler only, last video. Nonlinear rules: LinTS 0.886, rule 0.509, best fixed arm 0.489. Noisy feedback: 0.851, rule 0.629, best fixed arm 0.835. Arbitrary rules: 0.525, rule 0.508, best fixed arm 0.570 (it loses here: there is nothing to learn, so it chases noise). |
 
-| E11 rhythm | Beats equal to the creator's ideal on held-out videos, 4 creator types x 6 seeds: RLSVI 0.859, bandit on the same features 0.870, fixed rule 0.480. Whole-video rating: +0.04, +0.00, -0.41. RLSVI and the bandit are effectively tied. |
+| E11 rhythm | Beats equal to the creator's ideal on unseen seeds, 4 creator types x 10 seeds: RLSVI 0.904, bandit on the same features 0.915, fixed rule 0.469. Whole-video rating: +0.05, +0.05, -0.41. RLSVI and the bandit are effectively tied. |
+| Bandit settings | Lower posterior noise and random tries in the product: 0.903 vs 0.892 after 6 videos on unseen seeds; recovery after a style change about the same (0.802 vs 0.811). E1-E10 above used the earlier settings. |
 
 ## Likely questions
 - **Does RLSVI beat the bandit?** Not in E11: they tie, and both beat a fixed rule by a wide margin. These creators react to state both agents can see, so a bandit with history features captures most of it. Say that plainly: the rhythm decision is sequential by construction, but E11 does not show that the sequential method pays off yet.
@@ -57,7 +58,7 @@ creators: no human study (E11/E12 in PLAN) has been run, so do not claim one.
 - Beam size 10 fixed a misread line on the real clip ("this is the entity of mentors" -> "send it to your mentors"), chosen from that one clip. Beam 5 occasionally gave different text between runs, cause not found; do not promise identical transcripts.
 - The speaker's name is transcribed "Taran" on the real clip. Names can be wrong: fix them by double-clicking the caption word.
 - Hook selection picks the on-screen opening title; it does not move footage to the front.
-- Lines spoken to the crew rather than the viewer are not detected, so they stay in the first cut.
+- Crew chatter detection is word- and delivery-based, English only, with weights from a few real clips. It can miss a line or cut one that belonged: the cut can be undone like any other. A line that mentions production and is also said quietly is the typical false positive.
 - A target is a limit: a clip whose good edit is shorter stays shorter (the 30 s target on the stress clip gives ~19 s).
 - The style sentence names only a leaning ("early guess, leaning Storyteller") until 8 reviewed decisions, then shows percentages. The percentages are still sharp by design; the bandit's prior moves far more slowly (tempered).
 - First-video zooms are rare on purpose: the prior averages styles, most of which never zoom. Use "More zooms".

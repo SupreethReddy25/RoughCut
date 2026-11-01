@@ -229,3 +229,12 @@
     transition: none;
   }
 }
+
+@keyframes rc-scan {
+  0% { top: -2rem; }
+  100% { top: 100%; }
+}
+.rc-scan {
+  animation: rc-scan 1.8s linear infinite;
+}
+

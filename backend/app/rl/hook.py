@@ -16,6 +16,7 @@ from app.schemas import UnitsFile
 
 MAX_CANDIDATES = 3
 MAX_WORDS = 8
+MAX_CHARS = 34
 FEATURES = ("bias", "is_first", "has_number", "is_question", "has_you", "n_words", "position", "centrality")
 PRIOR = {"bias": 0.1, "is_first": 0.5, "is_question": 0.3, "has_number": 0.2, "has_you": 0.1}
 LAMBDA = 2.0
@@ -26,7 +27,8 @@ _END = (".", "?", "!", "…")
 def candidates(uf: UnitsFile) -> list[dict]:
     """[{text, is_first, has_number, is_question, has_you, n_words, position, centrality}] with the first sentence first."""
     speech = {u.id: u for u in uf.units if u.kind == "speech"}
-    skip = {i for i, u in speech.items() if u.features.get("is_earlier_take", 0.0) >= 0.5}
+    skip = {i for i, u in speech.items() if u.features.get("is_earlier_take", 0.0) >= 0.5
+            or u.features.get("crew_score", 0.0) >= 0.5}
     sentences: list[list] = [[]]
     for w in sorted(uf.words, key=lambda w: w.idx):
         if w.is_filler or w.unit_id in skip or w.unit_id not in speech:
@@ -39,7 +41,12 @@ def candidates(uf: UnitsFile) -> list[dict]:
     for ws in sentences:
         if len(ws) < 3:
             continue
-        raw = " ".join(w.text_display.strip() for w in ws[:MAX_WORDS])
+        raw = ""
+        for w in ws[:MAX_WORDS]:  # as many whole words as fit the frame on two lines
+            piece = w.text_display.strip()
+            if raw and len(raw) + 1 + len(piece) > MAX_CHARS:
+                break
+            raw = f"{raw} {piece}".strip()
         text = raw.rstrip(",;:.!?…- ").strip()
         low = " ".join(w.text_display.strip().lower() for w in ws)
         ids = {w.unit_id for w in ws}

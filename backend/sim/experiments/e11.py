@@ -28,7 +28,7 @@ from pathlib import Path
 
 import numpy as np
 
-from app.rl.rhythm import Episode, RhythmAgent, Step
+from app.rl.rhythm import GAMMA, Episode, RhythmAgent, Step
 from app.session import EditSession
 from sim.experiments import plots
 from sim.experiments.common import ci95, run_parallel, videos_for
@@ -106,7 +106,9 @@ def e11_task(task: dict) -> dict:
     if algo == "rule":
         curve = [_eval(name, tests, _rule)] * (task["videos"] + 1)
         return {**task, "curve": curve}
-    agent = RhythmAgent(seed=seed, gamma=0.0 if algo == "bandit" else 0.9, n_draws=0)
+    kw = task.get("kw", {}) if algo == "rlsvi" else {}
+    agent = RhythmAgent(seed=seed, gamma=0.0 if algo == "bandit" else kw.get("gamma", GAMMA), n_draws=0,
+                        **{k: v for k, v in kw.items() if k != "gamma"})
 
     def mean_act(ctx):
         return agent.mean_action(ctx)
@@ -145,8 +147,8 @@ def e11_task(task: dict) -> dict:
     return {**task, "curve": curve}
 
 
-def run(seeds: int = 6, n_videos: int = 8, workers: int | None = None) -> list[dict]:
-    tasks = [{"persona": p, "algo": a, "seed": s, "videos": n_videos} for p in PERSONAS for a in COLOR
+def run(seeds: int = 6, n_videos: int = 8, workers: int | None = None, seed_base: int = 0) -> list[dict]:
+    tasks = [{"persona": p, "algo": a, "seed": seed_base + s, "videos": n_videos} for p in PERSONAS for a in COLOR
              for s in range(1, seeds + 1)]
     return run_parallel(e11_task, tasks, workers)
 
@@ -181,8 +183,9 @@ def main() -> None:
     ap.add_argument("--seeds", type=int, default=6)
     ap.add_argument("--videos", type=int, default=8)
     ap.add_argument("--workers", type=int, default=None)
+    ap.add_argument("--seed-base", type=int, default=100, help="settings were tuned on seeds 1-6: report on others")
     a = ap.parse_args()
-    s = report(run(a.seeds, a.videos, a.workers))
+    s = report(run(a.seeds, a.videos, a.workers, a.seed_base))
     for p, t in s["table"].items():
         print(p, {k: (round(v["acc"]["mean"][-1], 3), round(v["rating"]["mean"][-1], 2)) for k, v in t.items()})
     for algo in COLOR:

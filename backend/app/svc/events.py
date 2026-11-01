@@ -295,7 +295,7 @@ def _music(ctx: AppContext, b: Bundle, body: EventIn) -> list[EventRow]:
         raise ApiError(422, str(e)) from None
     if spec is not None and music_lib.track_path(ctx.data_dir, b.video.user_id, spec["track_id"]) is None:
         raise ApiError(404, f"no music track {spec['track_id']!r}")
-    cur = b.state.music.model_dump() if b.state.music else None
+    cur = b.state.music.model_dump(exclude={"start_s"}) if b.state.music else None  # when it comes in is its own decision
     if spec == cur:
         return []
     return [_event(b, "music", None, {"music": spec})]

@@ -23,6 +23,7 @@ from app.pipeline.pauses import Energy, PauseSpan
 from app.pipeline.segment import is_sentence_end
 from app.pipeline.semantic import STOPWORDS, redundancy_centrality, tfidf_scores, word_tfidf
 from app.pipeline.vision import FaceSample, face_stats
+from app.pipeline import crew
 from app.schemas import SCHEMA_VERSION, Unit, UnitsFile, Word
 
 FEATURE_VERSION = 1
@@ -392,6 +393,7 @@ def build_units(words: list[Word], spans: list[tuple[int, int]], pauses: list[Pa
             }
             add("pause", p.start, p.end, "", pf)
 
+    crew.annotate(units, words)
     uf = UnitsFile(schema_version=SCHEMA_VERSION, feature_version=FEATURE_VERSION, video_id=video_id,
                    duration=_f(duration), video_type=video_type, source_map=source_map or [], units=units,
                    words=words)

@@ -12,3 +12,4 @@ frontend/dist/
 *.egg-info/
 reports/*.mp4
 reports/*.srt
+RAW Footage/

@@ -14,12 +14,15 @@ interface Props {
   after: number;
   /** source time of the edit's playhead: the original follows it while it is not playing by itself */
   srcTime: number;
+  /** the edit is playing, and where it is: pausing it pauses the original, its natural end does not */
+  editPlaying: boolean;
+  editOut: number;
   onPlayBoth: () => void;
 }
 
 /** The untouched upload next to the edit. It follows the edit's playhead, or both can run from the start in real time,
  *  which is what makes the difference in length felt. */
-export const ComparePanel = forwardRef<CompareHandle, Props>(function ComparePanel({ projectId, before, after, srcTime, onPlayBoth }, ref) {
+export const ComparePanel = forwardRef<CompareHandle, Props>(function ComparePanel({ projectId, before, after, srcTime, editPlaying, editOut, onPlayBoth }, ref) {
   const video = useRef<HTMLVideoElement>(null);
   const [muted, setMuted] = useState(true);
   const [playing, setPlaying] = useState(false);
@@ -41,6 +44,12 @@ export const ComparePanel = forwardRef<CompareHandle, Props>(function ComparePan
     const v = video.current;
     if (v && !playing && Math.abs(v.currentTime - srcTime) > 0.25) v.currentTime = srcTime;
   }, [srcTime, playing]);
+
+  const wasPlaying = useRef(false);
+  useEffect(() => {
+    if (wasPlaying.current && !editPlaying && editOut < after - 0.25) video.current?.pause();
+    wasPlaying.current = editPlaying;
+  }, [editPlaying, editOut, after]);
 
   const saved = before > 0 ? Math.max(0, Math.round((1 - after / before) * 100)) : 0;
   return (

@@ -8,6 +8,7 @@ from sqlmodel import select
 
 from app.models import SuggestionRow, UnitRow, Video, WordRow
 from app.policy import context
+from app.svc.bundle import NEEDS_EYE_CAP
 from tests.apihelpers import make_client, new_ready_project, upload, wait_ready
 
 
@@ -201,7 +202,11 @@ def test_suggest_creates_decisions_for_every_type_and_is_idempotent(client, ctx)
     assert sorted(s["queue"]["needs_review"] + s["queue"]["confident"]) == ids
     conf = {x["id"]: x["confidence"] for x in s["suggestions"]}
     nr = [conf[i] for i in s["queue"]["needs_review"]]
-    assert all(c < 0.7 for c in nr) and nr == sorted(nr) and all(conf[i] >= 0.7 for i in s["queue"]["confident"])
+    kind = {x["id"]: x["decision_type"] for x in s["suggestions"]}
+    assert all(c < 0.7 for c in nr) and nr == sorted(nr)
+    # the spot-check list is the confident ones, plus cosmetic decisions beyond their cap in "needs your eye"
+    assert all(conf[i] >= 0.7 or kind[i] in NEEDS_EYE_CAP for i in s["queue"]["confident"])
+    assert sum(kind[i] == "emphasis" for i in s["queue"]["needs_review"]) <= NEEDS_EYE_CAP["emphasis"]
     assert s["style_mixture"]["n_events"] == 0 and abs(sum(s["style_mixture"]["weights"].values()) - 1) < 1e-9
     again = client.post(f"/api/projects/{pk}/suggest").json()
     assert sorted(x["id"] for x in again["suggestions"]) == ids  # not regenerated

@@ -38,6 +38,7 @@ import numpy as np
 
 from app.edl.build import PAD, PAUSE_TARGET
 from app.policy import context
+from app.pipeline.crew import THRESHOLD as CREW_THRESHOLD
 from app.pipeline.segment import is_sentence_end
 from app.schemas import UnitsFile
 
@@ -49,6 +50,7 @@ TOL = 0.05  # +-5 % of the target is free
 CALIBRATION_STEPS = 2  # re-plan against the real EDL length this many times
 N_DRAWS = 16
 EPS_FLOOR = 0.02
+CREW_CUT_REWARD = 4.0
 
 
 @dataclass
@@ -58,6 +60,7 @@ class Stage:
     delta: dict[str, float]  # output seconds each action keeps
     x: np.ndarray  # context vector (history features from the bandit's own trajectory)
     tied: bool = False  # phrase continuing the sentence of the previous phrase: must share its fate
+    crew: bool = False  # sounds like talk to the crew: the plan should cut it (pipeline/crew.py)
 
 
 def _trajectory_history(uf: UnitsFile, video_type: str, policy) -> dict[tuple[str, int], dict[str, float]]:
@@ -97,6 +100,7 @@ def build_stages(uf: UnitsFile, video_type: str, policy) -> list[Stage]:
         d = su.end - su.start
         st = _stage("phrase", su.id, {"KEEP": d, "CUT": 0.0}, su.features, of("phrase", su), video_type)
         st.tied = k > 0 and _continues(speech[k - 1], su)
+        st.crew = su.features.get("crew_score", 0.0) >= CREW_THRESHOLD
         out.append(st)
     return out
 
@@ -137,6 +141,8 @@ class Plan:
             q = np.empty((len(arms), nb, SC_MAX + 1))
             for ai, a in enumerate(arms):
                 r = float(theta[(st.decision_type, a)] @ st.x) + (offsets or {}).get(st.decision_type, {}).get(a, 0.0)
+                if st.crew and a == "CUT":
+                    r += CREW_CUT_REWARD
                 shift = int(round(st.delta[a] / GRID))
                 nxt_out = np.minimum(np.arange(nb) + shift, nb - 1)
                 if st.decision_type == "phrase":

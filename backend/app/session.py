@@ -20,12 +20,15 @@ from app.edl.build import (
     Decisions,
     build_edl_with_lines,
 )
+from app.pipeline.crew import THRESHOLD as CREW_THRESHOLD
 from app.policy import context
 from app.policy.base import Choice, Policy
 from app.schemas import EDL, Suggestion, Unit, UnitsFile, Word
 
 FEATURE_VERSION = context.CONTEXT_VERSION
 ZOOM_NEVER_S = 30.0  # seconds-since-a-visual-change before the first one
+MIN_BEAT_SECONDS = 1.0
+CREW_CUT_BONUS = 4.0  # score offset for CUT on a line that sounds like talk to the crew (pipeline/crew.py)
 
 
 @dataclass
@@ -64,6 +67,7 @@ class EditSession:
         self._last_visual_t: float | None = None
         self._last_visual = 0
         self._streak = 0
+        self._n_beats = 0
         self.word_feats = word_feats or {}
         self.video_type = video_type or uf.video_type
         self.decisions = Decisions()
@@ -103,7 +107,8 @@ class EditSession:
         if dt == "rhythm":
             since = (self._phrase_out_start - self._last_visual_t if self._last_visual_t is not None else ZOOM_NEVER_S)
             hist.update(hist_since_visual=min(max(since, 0.0), ZOOM_NEVER_S), hist_last_visual=float(self._last_visual),
-                        hist_streak=float(self._streak))
+                        hist_streak=float(self._streak),
+                        hist_beats_per_min=self._n_beats / max(self._phrase_out_start / 60.0, 0.25))
         ctx = context.build_context(u.features, hist, self.video_type)
         return Item(dt, u.id, ctx, context.arms_for(dt), u, word_ids)
 
@@ -132,8 +137,9 @@ class EditSession:
                                                 if w.is_filler and fu.start - 1e-3 <= w.start and w.end <= fu.end + 1e-3])
             if self.agents:
                 ids = [w.id for w in self._words_of.get(su.id, [])]
-                yield self._item("rhythm", su, ids)
-                yield self._item("pace", su, ids)
+                if su.end - su.start >= MIN_BEAT_SECONDS:  # a punch-in on one word is a flicker, not a beat
+                    yield self._item("rhythm", su, ids)
+                    yield self._item("pace", su, ids)
             else:
                 yield self._item("zoom", su, [w.id for w in self._words_of.get(su.id, [])])
         yield from self._emphasis_items()
@@ -193,6 +199,7 @@ class EditSession:
                 self._streak = 0
             else:
                 self._streak += 1
+                self._n_beats += 1
                 self._last_visual_t = self._phrase_out_start
                 self._last_visual = {"Z115": 1, "Z130": 1, "TEXT_POP": 2, "SFX": 3}[action]
         elif dt == "pace":
@@ -298,6 +305,8 @@ def suggest(uf: UnitsFile, word_feats: dict[int, dict[str, float]] | None, polic
         off = (offsets or {}).get(item.decision_type)
         if item.decision_type in DEFAULT_OFFSETS:
             off = {**DEFAULT_OFFSETS[item.decision_type], **(off or {})}
+        if item.decision_type == "phrase" and item.ctx.get("crew_score", 0.0) >= CREW_THRESHOLD:
+            off = {**(off or {}), "CUT": (off or {}).get("CUT", 0.0) + CREW_CUT_BONUS}
         planned = planned_choice(planner, item, sess)
         agent_name = None
         if planned is not None:
@@ -311,7 +320,8 @@ def suggest(uf: UnitsFile, word_feats: dict[int, dict[str, float]] | None, polic
             agent_name = hook.name
             best.append(mean_a)
         else:
-            choice = (greedy_choice(policy, item.decision_type, item.ctx, off) if greedy
+            # highlights are many and cosmetic: on a real video they follow the model's opinion, with no random tries
+            choice = (greedy_choice(policy, item.decision_type, item.ctx, off) if greedy or (agents and item.decision_type == "emphasis")
                       else policy.choose(item.decision_type, item.ctx, off))
             scores = policy.mean_scores(item.decision_type, item.ctx)
             for arm, o in (off or {}).items():

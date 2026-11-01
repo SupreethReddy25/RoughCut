@@ -83,4 +83,4 @@ def snapshot(ctx: AppContext, v: Video) -> dict:
         stages.append({"key": key, "label": label, "state": state, "seconds": round(seconds, 1)})
     return {"stages": stages, "fraction": round(min(finished / total, 0.99), 3) if total else 0.0,
             "seconds_left": round(max(total - finished, 0.0), 1), "video_seconds": video_seconds,
-            "learned": bool(rates), "waiting": not marks}
+            "learned": bool(rates), "waiting": not marks, "live": marks.get("live", {})}
