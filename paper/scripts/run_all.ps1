@@ -2,7 +2,7 @@
 # not stop the others.   powershell -ExecutionPolicy Bypass -File paper\scripts\run_all.ps1
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 Set-Location $root
-$env:PYTHONPATH = "backend"
+$env:PYTHONPATH = "backend;paper\scripts"
 $env:ROUGHCUT_DATA_DIR = "C:\tmp\rc_paper"
 $py = "backend\.venv\Scripts\python.exe"
 $log = "paper\data\run_all.log"
@@ -18,7 +18,11 @@ $steps = @(
     "paper\scripts\new_features.py",
     "paper\scripts\measure_runtime.py",
     "paper\scripts\real_clips.py",
-    "paper\scripts\make_figures.py"
+    "paper\scripts\make_figures.py",
+    "paper\scripts\deep_baselines.py",
+    "paper\scripts\deep_rhythm_tune.py",
+    "paper\scripts\make_new_figures.py",
+    "paper\scripts\make_diagrams.py"
 )
 foreach ($s in $steps) {
     "BEGIN $s $(Get-Date -Format HH:mm:ss)" | Out-File $log -Append -Encoding utf8

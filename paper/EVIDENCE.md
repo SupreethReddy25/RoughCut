@@ -1,6 +1,6 @@
 # Evidence for the paper
 
-All numbers come from the final code. Regenerate them with `powershell -ExecutionPolicy Bypass -File paper\scripts\run_all.ps1`. `main.tex` predates these results and has not been updated.
+All numbers come from the final code. Regenerate them with `powershell -ExecutionPolicy Bypass -File paper\scripts\run_all.ps1`. `main.tex` is built from `main_base.tex` by `scripts/build_tex.py`, which fills in these results. After editing `main.tex` by hand, do not run that script again, or the edits are lost.
 
 ## Where each result lives
 
@@ -36,6 +36,8 @@ Simulated creators unless stated. CI = 95% confidence interval half-width.
 | E11 RLSVI minus bandit | matches −0.018 (CI 0.019, p = 0.055); rating +0.003 (CI 0.071, p = 0.93) |
 | Final vs earlier bandit settings, 120 fresh runs, video 6 | 0.903 vs 0.892 (+0.011, CI 0.005) |
 | Drift with final settings, 6 videos after the switch | 0.829 vs 0.814 (+0.015, CI 0.013, n = 20) |
+| Neural bandit, 60 runs, same seeds as the other baselines | blank: 0.897 at video 10, regret 225.3; pretrained: 0.896, regret 217.8; proposed: 0.910, regret 181.5 |
+| Tuned deep agents on rhythm (`deep_numbers.json`) | DQN 0.855 blank, 0.865 warm; PPO 0.532 blank, 0.542 warm; ratings +0.04, +0.03, −0.25, −0.11 |
 | Cost | RLSVI 145 parameters, 16 ms to prepare a video after 10 videos, 0.08 ms per decision; planner about 186 ms per video |
 
 ## Real clips

@@ -63,10 +63,10 @@ W, H = 20.4, 13
 xs = [1 + i * (W + 3.3) for i in range(6)]
 top, bot = 24, 3
 tops = [("Raw clip\n(English speech)", False), ("Transcription,\nalignment, disfluency\nrecovery", False),
-        ("State extraction:\npauses, fillers, retakes,\nsemantics, face", False), ("Agent: LinTS per\ncreator with\nstyle prior", True),
+        ("State extraction: pauses,\nfillers, retakes, crew\nlines, semantics, face", False), ("Agents per creator:\nLinTS + style prior,\nRLSVI, hook bandit", True),
         ("Posterior-sampling\nplanner (when a\ntarget is set)", True), ("Action applied to\nthe edit decision\nlist", False)]
-bots = [("Off-policy\nevaluation", True), ("Event log with\ncontext and\npropensity", False), ("Reward mapping\n+1, −1, +0.5", False),
-        ("Creator: accept,\nreject, or edit\nthe transcript", False), ("Review queue\nordered by\n1 − confidence", True),
+bots = [("Off-policy\nevaluation", True), ("Event log with\ncontext and\npropensity", False), ("Reward mapping\n+1, −1, +0.5;\ndelayed rating", False),
+        ("Creator: accept, reject,\nedit the transcript,\nrate the export", False), ("Review queue\nordered by\n1 − confidence", True),
         ("Export: 1080 × 1920,\ncaptions, −14 LUFS", False)]
 for x, (t, hot) in zip(xs, tops):
     box(ax, x, top, W, H - 1, t, hot, size=6.3)
