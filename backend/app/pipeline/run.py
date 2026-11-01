@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 
 from app import config
-from app.pipeline import features, fillers, ingest, pauses, segment, semantic, transcribe, vision
+from app.pipeline import align, features, fillers, ingest, pauses, segment, semantic, transcribe, vision
 from app.schemas import UnitsFile
 
 log = logging.getLogger(__name__)
@@ -47,6 +47,9 @@ def run_pipeline(inputs: list[str | Path], video_id: str | None = None, video_ty
 
     t0 = time.time()
     tr = transcribe.transcribe(ing.wav, model_size=whisper_model)
+    detected = transcribe.detect_language(ing.wav)
+    if detected:
+        tr["detected_language"], tr["detected_language_prob"] = detected[0], round(detected[1], 3)
     (out / "transcript.json").write_text(json.dumps(tr, indent=1, ensure_ascii=False), encoding="utf-8")
     step("transcribe", t0, f"{len(tr['words'])} words")
     if not tr["words"]:
@@ -55,6 +58,8 @@ def run_pipeline(inputs: list[str | Path], video_id: str | None = None, video_ty
     t0 = time.time()
     words = transcribe.words_from_transcript(tr)
     en = pauses.energy_from_wav(ing.wav)
+    align.align_words(words, ing.wav)
+    words = transcribe.drop_hallucinations(words, en)  # after alignment: Whisper's own timing can be seconds off
     pauses.refine_word_edges(words, en)
     segment.clamp_to_takes(words, take_bounds)
     for w in words:  # Whisper can place the last word slightly past the end of the media
@@ -62,6 +67,7 @@ def run_pipeline(inputs: list[str | Path], video_id: str | None = None, video_ty
         w.start = min(w.start, w.end - 0.02)
     spans = segment.segment_speech(words, take_bounds)
     groups = fillers.find_fillers(words, spans)
+    fillers.snap_to_valleys(words, groups, en)
     pause_spans = pauses.build_pause_spans(words, spans, take_bounds)
     step("pauses+segment+fillers", t0,
          f"{len(spans)} phrases, {len(pause_spans)} pauses, {len(groups)} fillers (thr {en.thr:.1f} dB)")

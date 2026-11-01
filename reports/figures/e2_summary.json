@@ -1,60 +1,60 @@
 {
  "cold_start": {
   "none": {
-   "early": 0.8167754913482852,
+   "early": 0.8193769477155163,
    "mean_curve": [
-    0.7577168081485364,
-    0.8317053446398799,
-    0.8609043212564396,
-    0.8805822098452937,
-    0.8817607325216041,
-    0.8837309680691381
+    0.7650655770593888,
+    0.8358884451880209,
+    0.8571768208991393,
+    0.8819661390914593,
+    0.8874563536038855,
+    0.8902590049391877
    ],
    "by_persona": {
-    "snappy": 0.7860154598588555,
-    "relaxed": 0.8966796293341923,
-    "storyteller": 0.7818503762789369,
-    "minimalist": 0.8101720758196402,
-    "focused": 0.8219033908861723,
-    "blend": 0.8040320159119146
+    "snappy": 0.7931445507010852,
+    "relaxed": 0.8988707083679731,
+    "storyteller": 0.7859217992223405,
+    "minimalist": 0.8105348175466784,
+    "focused": 0.8287228883508984,
+    "blend": 0.7990669221041216
    }
   },
   "generic": {
-   "early": 0.8342112389282151,
+   "early": 0.8311759415192493,
    "mean_curve": [
-    0.7881942381226755,
-    0.8504948604668396,
-    0.8639446181951306,
-    0.8768472004967135,
-    0.8817311086383015,
-    0.8911733634486002
+    0.7864072913124,
+    0.8462967480161263,
+    0.860823785229222,
+    0.878755011646337,
+    0.8789774912213918,
+    0.8863887110512639
    ],
    "by_persona": {
-    "snappy": 0.7861497695494276,
-    "relaxed": 0.9098855733411964,
-    "storyteller": 0.8250529357078341,
-    "minimalist": 0.8033752123464232,
-    "focused": 0.8678495380364842,
-    "blend": 0.8129544045879253
+    "snappy": 0.7867279366485618,
+    "relaxed": 0.9060346856634748,
+    "storyteller": 0.8216476159622258,
+    "minimalist": 0.8095772254603919,
+    "focused": 0.8516249360565579,
+    "blend": 0.8114432493242835
    }
   },
   "mixture": {
-   "early": 0.8408409440158373,
+   "early": 0.8473211769629679,
    "mean_curve": [
-    0.8026913769793554,
-    0.8483901054964431,
-    0.871441349571714,
-    0.8817742404458324,
-    0.8933867851904294,
-    0.8987780545350508
+    0.8035481700221975,
+    0.8591050862106219,
+    0.8793102746560836,
+    0.8861328808976173,
+    0.8867422986046568,
+    0.8923360914308657
    ],
    "by_persona": {
-    "snappy": 0.8398076856057869,
-    "relaxed": 0.9065110765144816,
-    "storyteller": 0.8063794801704168,
-    "minimalist": 0.8029512926770441,
-    "focused": 0.8315948331920201,
-    "blend": 0.8578012959352758
+    "snappy": 0.8517960797022295,
+    "relaxed": 0.9036051331334226,
+    "storyteller": 0.8213077919255619,
+    "minimalist": 0.8120898405569855,
+    "focused": 0.8342912468923471,
+    "blend": 0.8608369695672609
    }
   }
  },
@@ -62,10 +62,10 @@
   "plain": {
    "by_persona": {
     "snappy": {
-     "median": 7.5,
-     "max": 39,
+     "median": 9.0,
+     "max": 35,
      "identified": "10/10",
-     "stable_median": 10.0
+     "stable_median": 12.0
     },
     "relaxed": {
      "median": 4.0,
@@ -80,51 +80,10 @@
      "stable_median": 3.0
     },
     "minimalist": {
-     "median": 4.5,
-     "max": 13,
+     "median": 3.5,
+     "max": 15,
      "identified": "10/10",
-     "stable_median": 4.5
-    },
-    "focused": {
-     "median": 2.0,
-     "max": 6,
-     "identified": "10/10",
-     "stable_median": 2.0
-    },
-    "blend": {
-     "median": 5.0,
-     "max": 7,
-     "identified": "10/10",
-     "stable_median": 5.0
-    }
-   },
-   "median_over_personas": 4.25
-  },
-  "product": {
-   "by_persona": {
-    "snappy": {
-     "median": 7.0,
-     "max": 11,
-     "identified": "10/10",
-     "stable_median": 7.0
-    },
-    "relaxed": {
-     "median": 4.0,
-     "max": 9,
-     "identified": "10/10",
-     "stable_median": 4.0
-    },
-    "storyteller": {
-     "median": 3.0,
-     "max": 13,
-     "identified": "10/10",
-     "stable_median": 3.0
-    },
-    "minimalist": {
-     "median": 4.0,
-     "max": 12,
-     "identified": "10/10",
-     "stable_median": 5.5
+     "stable_median": 3.5
     },
     "focused": {
      "median": 2.5,
@@ -133,13 +92,54 @@
      "stable_median": 2.5
     },
     "blend": {
+     "median": 6.0,
+     "max": 8,
+     "identified": "10/10",
+     "stable_median": 6.0
+    }
+   },
+   "median_over_personas": 3.75
+  },
+  "product": {
+   "by_persona": {
+    "snappy": {
+     "median": 7.5,
+     "max": 36,
+     "identified": "10/10",
+     "stable_median": 7.5
+    },
+    "relaxed": {
+     "median": 3.5,
+     "max": 8,
+     "identified": "10/10",
+     "stable_median": 3.5
+    },
+    "storyteller": {
+     "median": 3.5,
+     "max": 13,
+     "identified": "10/10",
+     "stable_median": 3.5
+    },
+    "minimalist": {
+     "median": 3.5,
+     "max": 12,
+     "identified": "10/10",
+     "stable_median": 3.5
+    },
+    "focused": {
+     "median": 3.0,
+     "max": 6,
+     "identified": "10/10",
+     "stable_median": 3.0
+    },
+    "blend": {
      "median": 5.0,
      "max": 8,
      "identified": "10/10",
-     "stable_median": 5.0
+     "stable_median": 6.0
     }
    },
-   "median_over_personas": 4.0
+   "median_over_personas": 3.5
   }
  },
  "threshold": 0.8

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { BrowserRouter, Link, NavLink, Navigate, Route, Routes } from "react-router-dom";
+import { Avatar, LogoMark, Wordmark } from "./components/Brand";
 import { UserProvider, useUser } from "./hooks/useUser";
 import EditorPage from "./pages/EditorPage";
 import ProfilePage from "./pages/ProfilePage";
@@ -30,40 +31,50 @@ function UserGate() {
   if (loading) return <p className="p-10 text-center text-neutral-400">Loading…</p>;
   if (error) {
     return (
-      <p role="alert" className="mx-auto mt-10 max-w-md rounded bg-red-500/20 p-3 text-center text-sm text-red-200">
+      <p role="alert" className="mx-auto mt-10 max-w-md rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-center text-sm text-red-200">
         Cannot reach the RoughCut server: {error}
       </p>
     );
   }
   return (
-    <div className="mx-auto max-w-sm p-8">
-      <h1 className="mb-1 text-2xl font-semibold">RoughCut</h1>
-      <p className="mb-5 text-sm text-neutral-400">Who is editing? RoughCut learns your taste per person.</p>
-      {users.length > 0 && (
-        <ul className="mb-5 space-y-1.5">
-          {users.map((u) => (
-            <li key={u.id}>
-              <button type="button" onClick={() => choose(u)} className="w-full rounded border border-white/15 px-3 py-2 text-left hover:bg-white/10">
-                {u.name}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <form onSubmit={submit} className="space-y-2" aria-label="New profile">
-        <label className="block text-sm text-neutral-300">
-          New profile
-          <input value={name} onChange={(e) => setName(e.target.value)} maxLength={60} placeholder="Your name" className="mt-1 w-full rounded bg-neutral-800 px-2 py-1.5" />
-        </label>
-        {err && (
-          <p role="alert" className="text-sm text-red-300">
-            {err}
-          </p>
-        )}
-        <button type="submit" disabled={!name.trim() || busy} className="w-full rounded bg-sky-600 py-2 font-medium text-white hover:bg-sky-500 disabled:opacity-50">
-          Create and continue
-        </button>
-      </form>
+    <div className="rc-glow flex min-h-screen items-center justify-center p-6">
+      <div className="w-full max-w-sm">
+        <div className="mb-7 flex flex-col items-center text-center">
+          <LogoMark size={48} />
+          <h1 className="rc-brand mt-4 text-3xl font-semibold tracking-tight">RoughCut</h1>
+          <p className="mt-2 text-sm text-neutral-400">An editor that learns how you cut. Who is editing?</p>
+        </div>
+        <div className="rc-panel p-4 shadow-2xl shadow-black/40">
+          {users.length > 0 && (
+            <ul className="mb-4 space-y-1.5">
+              {users.map((u) => (
+                <li key={u.id}>
+                  <button type="button" onClick={() => choose(u)} className="group flex w-full items-center gap-3 rounded-lg border border-white/8 bg-white/[0.02] px-3 py-2.5 text-left hover:border-sky-400/50 hover:bg-sky-500/10">
+                    <Avatar name={u.name} />
+                    <span className="flex-1 font-medium">{u.name}</span>
+                    <span aria-hidden="true" className="text-neutral-500 group-hover:text-sky-300">→</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <form onSubmit={submit} className="space-y-2.5" aria-label="New profile">
+            <label className="block text-xs font-medium text-neutral-400">
+              New profile
+              <input value={name} onChange={(e) => setName(e.target.value)} maxLength={60} placeholder="Your name" className="mt-1.5 w-full rounded-lg bg-neutral-900 px-3 py-2 text-sm text-neutral-100" />
+            </label>
+            {err && (
+              <p role="alert" className="text-sm text-red-300">
+                {err}
+              </p>
+            )}
+            <button type="submit" disabled={!name.trim() || busy} className="w-full rounded-lg bg-sky-600 py-2.5 text-sm font-medium text-white shadow-lg shadow-sky-900/40 hover:bg-sky-500 disabled:opacity-40 disabled:shadow-none">
+              Create and continue
+            </button>
+          </form>
+        </div>
+        <p className="mt-5 text-center text-[11px] text-neutral-600">Every profile has its own learner: your edits never train someone else&apos;s.</p>
+      </div>
     </div>
   );
 }
@@ -79,18 +90,32 @@ function Shell() {
         path="*"
         element={
           <div className="min-h-screen">
-            <nav className="flex items-center gap-4 border-b border-white/10 px-6 py-3 text-sm">
-              <Link to="/" className="mr-2 text-lg font-semibold">
-                RoughCut
+            <nav className="sticky top-0 z-30 flex items-center gap-1 border-b border-white/[0.06] bg-neutral-950/75 px-5 py-2.5 text-sm backdrop-blur-xl">
+              <Link to="/" className="mr-5" aria-label="RoughCut home">
+                <Wordmark />
               </Link>
-              <NavLink to="/" end className={({ isActive }) => (isActive ? "text-white" : "text-neutral-400 hover:text-neutral-200")}>
-                Projects
-              </NavLink>
-              <NavLink to="/profile" className={({ isActive }) => (isActive ? "text-white" : "text-neutral-400 hover:text-neutral-200")}>
-                Profile
-              </NavLink>
-              <span className="ml-auto text-neutral-400">{user.name}</span>
-              <button type="button" onClick={() => choose(null)} className="text-sky-400 hover:underline">
+              {(
+                [
+                  ["/", "Projects"],
+                  ["/profile", "Profile"],
+                ] as const
+              ).map(([to, label]) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  end={to === "/"}
+                  className={({ isActive }) =>
+                    `rounded-full px-3 py-1.5 ${isActive ? "bg-white/[0.08] text-white" : "text-neutral-400 hover:bg-white/[0.04] hover:text-neutral-200"}`
+                  }
+                >
+                  {label}
+                </NavLink>
+              ))}
+              <span className="ml-auto flex items-center gap-2 text-neutral-300">
+                <Avatar name={user.name} size={26} />
+                <span className="hidden sm:inline">{user.name}</span>
+              </span>
+              <button type="button" onClick={() => choose(null)} className="ml-1 rounded-full px-2.5 py-1 text-xs text-neutral-400 hover:bg-white/[0.06] hover:text-white">
                 Switch
               </button>
             </nav>

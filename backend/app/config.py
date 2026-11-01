@@ -12,7 +12,7 @@ PROCESSED_DIR = DATA_DIR / "processed"
 DB_PATH = DATA_DIR / "db.sqlite"
 ASSETS_DIR = REPO_ROOT / "backend" / "assets"
 
-MAX_TOTAL_SECONDS = 180
+MAX_TOTAL_SECONDS = 300
 MAX_TOTAL_BYTES = 500 * 1024 * 1024
 
 
@@ -28,6 +28,8 @@ def _load_dotenv() -> None:
 
 
 _load_dotenv()
+
+PRELOAD_MODELS = os.environ.get("ROUGHCUT_PRELOAD", "1").strip().lower() not in ("0", "false", "no", "off")
 
 
 def _find_tool(name: str) -> str | None:

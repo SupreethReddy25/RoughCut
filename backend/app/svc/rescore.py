@@ -18,11 +18,14 @@ from sqlmodel import Session
 
 from app.api.io import ChangeOut
 from app.models import SuggestionRow
+from app.session import PLANNER_TAG
 from app.policy.log_replay import Learner
 from app.svc.bundle import Bundle
 
 MARGIN = 0.5  # a replacement must be better than the current action by this much (posterior-mean reward units)
 NUDGE_SHARE = 0.25  # one nudge click changes at most this share of a decision type's suggestions (at least one)
+RESCORE_SHARE = 0.25  # ... and so does one feedback event (live re-scoring)
+RESCORE_CONFIDENCE = 0.8  # live re-scoring only proposes an action Thompson sampling would pick this often
 
 
 def total_offsets(nudges: list[dict]) -> dict[str, dict[str, float]]:
@@ -36,14 +39,17 @@ def total_offsets(nudges: list[dict]) -> dict[str, dict[str, float]]:
     return out
 
 
-def _cap_nudge(found: list[tuple[SuggestionRow, str, float]], per_type: Counter) -> list[tuple[SuggestionRow, str, float]]:
+def _cap_nudge(found: list[tuple[SuggestionRow, str, float]], per_type: Counter,
+               share: float = NUDGE_SHARE) -> list[tuple[SuggestionRow, str, float]]:
     """A nudge is a gentle push, not a switch: per decision type only the suggestions it moves the most (at most a
     quarter of them, at least one) change. Without this, a video whose phrases all look alike to the model would lose
-    every phrase on one click of "Snappier". Press it again for more; every press is one undo step."""
+    every phrase on one click of "Snappier". Press it again for more; every press is one undo step.
+    Live re-scoring after a feedback event is capped the same way: phrase contexts share most of their features, so
+    one rejected KEEP moves every phrase's score, and uncapped re-scoring would cut the whole video."""
     keep: list[tuple[SuggestionRow, str, float]] = []
     for dt, n in per_type.items():
         mine = sorted((f for f in found if f[0].decision_type == dt), key=lambda f: -f[2])
-        keep += mine[:max(1, math.ceil(NUDGE_SHARE * n))]
+        keep += mine[:max(1, math.ceil(share * n))]
     keep.sort(key=lambda f: f[0].id)  # stable order: the order the suggestions were made in
     return keep
 
@@ -53,8 +59,8 @@ def rescore(session: Session, b: Bundle, learner: Learner, event_id: int, nudge:
     offsets = total_offsets(b.state.nudges)
     found: list[tuple[SuggestionRow, str, float]] = []  # (suggestion, better action, how much better)
     for s in b.active:
-        if b.is_touched(s):
-            continue
+        if b.is_touched(s) or s.policy_name.endswith(PLANNER_TAG):
+            continue  # planned rows belong to a plan for the whole video: flipping one would break its length
         unit = b.unit_of(s)
         if not nudge and unit is not None and unit in b.seen_units:
             continue  # the user has already looked at it: don't move things under their eyes
@@ -74,9 +80,10 @@ def rescore(session: Session, b: Bundle, learner: Learner, event_id: int, nudge:
                 continue  # differs from the model's opinion only through exploration, not through the nudge
         elif best == s.mean_best:
             continue  # the model's opinion has not changed since this suggestion was made (it was an exploration)
+        elif policy.choose(dt, ctx).probs.get(best, 0.0) < RESCORE_CONFIDENCE:
+            continue  # the mean moved, but the model is not sure yet: leave the suggestion alone
         found.append((s, best, scores[best] - scores.get(current, scores[best])))
-    if nudge:
-        found = _cap_nudge(found, Counter(s.decision_type for s in b.active))
+    found = _cap_nudge(found, Counter(s.decision_type for s in b.active), NUDGE_SHARE if nudge else RESCORE_SHARE)
     changes: list[ChangeOut] = []
     for s, best, _gain in found:
         ctx, dt = s.context_raw_json, s.decision_type

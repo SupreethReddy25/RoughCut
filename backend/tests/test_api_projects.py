@@ -73,6 +73,21 @@ def test_create_project_validation(client, kwargs):
     assert client.post("/api/projects", files=files, data=data).status_code == 422
 
 
+def test_too_long_a_video_is_refused_at_upload_with_a_clear_message(client, ctx, monkeypatch):
+    from types import SimpleNamespace
+
+    from app.models import Video as V
+    from app.svc import projects as pj
+
+    uid = client.post("/api/users", json={"name": "Ana"}).json()["id"]
+    monkeypatch.setattr(pj, "probe", lambda _p: SimpleNamespace(duration=400.0))
+    r = client.post("/api/projects", files=[("files", ("long.mp4", io.BytesIO(b"x"), "video/mp4"))],
+                    data={"user_id": str(uid), "type": "vlog"})
+    assert r.status_code == 422 and "6:40" in r.json()["detail"] and "5 minutes" in r.json()["detail"]
+    with ctx.session() as s:
+        assert s.exec(select(V)).all() == []  # no failed project left behind
+
+
 def test_create_project_rejects_bad_uploads(client, ctx):
     uid = client.post("/api/users", json={"name": "Ana"}).json()["id"]
     ok = ("files", ("a.mp4", io.BytesIO(b"x"), "video/mp4"))

@@ -27,6 +27,7 @@ from app.models import (
     vid_str,
 )
 from app.pipeline.ingest import probe
+from app.pipeline.transcribe import LANGUAGE_WARN_PROB
 from app.policy.explain import explain
 from app.policy.preferences import describe_preferences
 from app.policy.reward import DEFAULT, LEARNED_KINDS, updates_for
@@ -134,6 +135,13 @@ def create_project(ctx: AppContext, session: Session, user_id: int, inputs: list
         raise ApiError(422, f"type must be one of {VIDEO_TYPES}")
     if target is not None and not 5 <= target <= 180:
         raise ApiError(422, "target duration must be between 5 and 180 seconds")
+    try:
+        total = sum(probe(p).duration for p in inputs)
+    except Exception:  # unreadable here: the analysis job reports it properly
+        total = 0.0
+    if total > config.MAX_TOTAL_SECONDS:
+        raise ApiError(422, f"This video is {int(total) // 60}:{int(total) % 60:02d} long. RoughCut handles up to "
+                            f"{config.MAX_TOTAL_SECONDS // 60} minutes in total: trim it and upload again.")
     v = Video(user_id=user_id, title=(title.strip() or names[0]), sources_json=[str(p) for p in inputs],
               video_type=video_type, target_duration=target, status="uploaded", autopilot=autopilot,
               settings_json={"defaults": sanitize_defaults(user.defaults_json)})  # the user's remembered settings
@@ -311,15 +319,29 @@ def suggest(ctx: AppContext, session: Session, pk: int):
                 return state_out(b, learner, message="Suggestions already exist.")
             auto = b.video.autopilot
             res = run_suggest(b.analysis.uf, b.analysis.word_feats, learner.policy, video_type=b.video.video_type,
-                              source="autopilot" if auto else "policy", greedy=auto)
+                              source="autopilot" if auto else "policy", greedy=auto,
+                              target=b.video.target_duration, seed=pk)
             rows = [row_from_suggestion(s, pk, mean_best=mb) for s, mb in zip(res.suggestions, res.mean_best, strict=True)]
             session.add_all(rows)
             session.flush()
             ctx.policies.commit(session, uid, learner)
             session.commit()
             return state_out(load_bundle(ctx, session, pk), learner,
-                             message=f"{len(rows)} suggestions made; {len(res.skipped_fillers)} fillers left alone "
-                                     "(no clean gap to cut in).")
+                             message=language_warning(ctx, pk) or f"{len(rows)} suggestions made; "
+                             f"{len(res.skipped_fillers)} fillers left alone (no clean gap to cut in).")
+
+
+def language_warning(ctx: AppContext, pk: int) -> str | None:
+    """Analysis is English-only: say so when the speech is clearly something else, rather than show a made-up edit."""
+    try:
+        tr = json.loads((ctx.video_dir(pk) / "transcript.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    lang, prob = tr.get("detected_language"), tr.get("detected_language_prob", 0.0)
+    if lang and lang != "en" and prob >= LANGUAGE_WARN_PROB:
+        return (f"This video sounds like it is not in English ({lang}, {prob:.0%} sure). RoughCut's analysis is English "
+                "only, so the transcript and the cuts below are unreliable.")
+    return None
 
 
 def recover_interrupted(ctx: AppContext) -> int:

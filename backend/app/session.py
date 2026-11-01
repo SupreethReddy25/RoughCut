@@ -202,20 +202,53 @@ def greedy_choice(policy: Policy, decision_type: str, ctx: dict[str, float],
     return Choice(best, 1.0, probs.get(best, 0.5), False, probs)
 
 
+def make_planner(uf: UnitsFile, video_type: str, policy: Policy, target: float | None, *, greedy: bool = False,
+                 offsets: dict[str, dict[str, float]] | None = None, seed: int = 0):
+    """The episode planner (app/rl/plan.py) when the video has a target duration and the policy is a linear bandit
+    whose posterior can be sampled; None otherwise (then every decision is the bandit's)."""
+    if not target or target <= 0 or not hasattr(policy, "_model"):
+        return None
+    from app.rl.plan import EpisodePlanner
+
+    return EpisodePlanner(uf, video_type, policy, target, greedy=greedy, offsets=offsets, seed=seed)
+
+
+PLANNER_TAG = "+psrl"  # appended to policy_name on suggestions the planner made
+
+
+def planned_choice(planner, item: Item, sess: EditSession) -> tuple[Choice, str] | None:
+    """(choice, posterior-mean plan's action) from the planner at the state the session is in, or None."""
+    if planner is None or not planner.handles(item.decision_type, item.target_id):
+        return None
+    a, p, probs, mean_a = planner.choose(item.decision_type, item.target_id, sess._out_t, sess._since_cut)
+    return Choice(a, p, p, a != mean_a, probs), mean_a
+
+
 def suggest(uf: UnitsFile, word_feats: dict[int, dict[str, float]] | None, policy: Policy, *,
             video_type: str | None = None, offsets: dict[str, dict[str, float]] | None = None,
-            source: str = "policy", greedy: bool = False) -> SuggestionSet:
+            source: str = "policy", greedy: bool = False, target: float | None = None,
+            seed: int = 0) -> SuggestionSet:
     """Run `policy` over the whole video (every proposal is applied), returning suggestions + decisions.
-    `greedy` = no exploration: the posterior mean decides (autopilot)."""
+    `greedy` = no exploration: the posterior mean decides (autopilot). With a `target` duration the phrase and
+    pause decisions come from the episode planner (posterior sampling over the whole edit, app/rl/plan.py)."""
     sess = EditSession(uf, word_feats, video_type)
+    planner = make_planner(uf, sess.video_type, policy, target, greedy=greedy, offsets=offsets, seed=seed)
     sugs, items, best = [], [], []
     for item in sess.items():
         off = (offsets or {}).get(item.decision_type)
-        choice = (greedy_choice(policy, item.decision_type, item.ctx, off) if greedy
-                  else policy.choose(item.decision_type, item.ctx, off))
-        scores = policy.mean_scores(item.decision_type, item.ctx)
-        best.append(max(scores, key=lambda a: scores[a]))
-        sugs.append(make_suggestion(item, choice, policy, uf.video_id, source))
+        planned = planned_choice(planner, item, sess)
+        if planned is not None:
+            choice, mean_a = planned
+            best.append(mean_a)
+        else:
+            choice = (greedy_choice(policy, item.decision_type, item.ctx, off) if greedy
+                      else policy.choose(item.decision_type, item.ctx, off))
+            scores = policy.mean_scores(item.decision_type, item.ctx)
+            best.append(max(scores, key=lambda a: scores[a]))
+        sug = make_suggestion(item, choice, policy, uf.video_id, source)
+        if planned is not None:
+            sug.policy_name += PLANNER_TAG
+        sugs.append(sug)
         items.append(item)
         sess.commit(item, choice.action)
     return SuggestionSet(sugs, items, sess.decisions, sess.skipped_fillers, best)

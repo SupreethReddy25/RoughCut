@@ -27,6 +27,7 @@ export default function UploadPage() {
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [uploaded, setUploaded] = useState(0);
+  const [dragging, setDragging] = useState(false);
 
   const addFiles = (list: FileList | null) => {
     if (!list || list.length === 0) return;
@@ -89,22 +90,25 @@ export default function UploadPage() {
   };
 
   return (
-    <form onSubmit={submit} className="mx-auto max-w-2xl space-y-5 p-6" aria-label="New project">
-      <div className="flex items-center">
-        <h1 className="text-2xl font-semibold">{batch ? "Batch upload" : "New project"}</h1>
-        <Link to="/" className="ml-auto text-sm text-sky-400 hover:underline">
+    <form onSubmit={submit} className="rc-in mx-auto max-w-2xl space-y-6 px-6 py-8" aria-label="New project">
+      <div className="flex items-end">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">{batch ? "Batch upload" : "New project"}</h1>
+          <p className="mt-1 text-sm text-neutral-400">Your agent makes the first cut; you only check what it is unsure about.</p>
+        </div>
+        <Link to="/" className="ml-auto text-sm text-neutral-400 hover:text-white">
           {uploaded > 0 ? "Go to projects" : "Cancel"}
         </Link>
       </div>
 
       <fieldset>
-        <legend className="mb-1 text-sm font-medium text-neutral-300">What are you uploading?</legend>
+        <legend className="rc-label mb-2">What are you uploading?</legend>
         <div className="grid grid-cols-2 gap-2">
           {[
             { id: false, label: "One video", hint: "several takes are joined in order" },
             { id: true, label: `Batch (up to ${BATCH_MAX})`, hint: "each file is edited automatically; you review or post" },
           ].map((m) => (
-            <label key={String(m.id)} className={`cursor-pointer rounded-lg border px-3 py-2 text-sm ${batch === m.id ? "border-sky-400 bg-sky-500/10" : "border-white/15 hover:bg-white/5"}`}>
+            <label key={String(m.id)} className={`rc-lift cursor-pointer rounded-xl border px-3.5 py-2.5 text-sm ${batch === m.id ? "border-sky-400/70 bg-sky-500/10 shadow-lg shadow-sky-950/40" : "border-white/[0.08] bg-white/[0.02] hover:border-white/20"}`}>
               <input type="radio" name="mode" className="sr-only" checked={batch === m.id} onChange={() => setBatch(m.id)} />
               <div className="font-medium">{m.label}</div>
               <div className="text-xs text-neutral-400">{m.hint}</div>
@@ -114,19 +118,39 @@ export default function UploadPage() {
       </fieldset>
 
       <section>
-        <h2 className="mb-1 text-sm font-medium text-neutral-300">Video clips</h2>
+        <h2 className="rc-label mb-1">Video clips</h2>
         <p className="mb-2 text-xs text-neutral-500">
-          {batch ? `Up to ${BATCH_MAX} videos, 3 minutes each.` : "Several takes are joined in the order shown (3 minutes in total at most)."}
+          {batch ? `Up to ${BATCH_MAX} videos, 5 minutes each.` : "Several takes are joined in the order shown (5 minutes in total at most)."}
         </p>
         <input ref={input} type="file" accept="video/*,.mkv,.mov" multiple className="hidden" aria-label="Choose video files" onChange={(e) => addFiles(e.target.files)} />
-        <button type="button" onClick={() => input.current?.click()} className="w-full rounded-lg border border-dashed border-white/25 p-5 text-sm text-neutral-300 hover:bg-white/5">
-          {files.length === 0 ? "Choose video files…" : "Add more files…"}
+        <button
+          type="button"
+          onClick={() => input.current?.click()}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragging(true);
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragging(false);
+            addFiles(e.dataTransfer.files);
+          }}
+          className={`group flex w-full flex-col items-center gap-2 rounded-2xl border border-dashed px-5 py-8 text-sm transition-colors ${
+            dragging ? "border-sky-400 bg-sky-500/10 text-sky-100" : "border-white/15 bg-white/[0.015] text-neutral-300 hover:border-sky-400/50 hover:bg-sky-500/[0.05]"
+          }`}
+        >
+          <span aria-hidden="true" className={`flex h-11 w-11 items-center justify-center rounded-xl bg-sky-500/10 text-lg text-sky-300 ring-1 ring-sky-400/20 transition-transform group-hover:-translate-y-0.5 ${dragging ? "scale-110" : ""}`}>
+            ↑
+          </span>
+          <span className="font-medium">{files.length === 0 ? "Choose video files…" : "Add more files…"}</span>
+          <span className="text-xs text-neutral-500">or drop them here · mp4, mov, mkv</span>
         </button>
         {files.length > 0 && (
           <ol className="mt-2 space-y-1" aria-label="Files in order">
             {files.map((f, i) => (
-              <li key={`${f.name}-${f.size}-${i}`} className="flex items-center gap-2 rounded border border-white/10 px-2 py-1 text-sm">
-                <span className="w-5 text-xs text-neutral-500">{i + 1}</span>
+              <li key={`${f.name}-${f.size}-${i}`} className="rc-in flex items-center gap-2 rounded-lg border border-white/[0.07] bg-white/[0.02] px-2.5 py-1.5 text-sm">
+                <span className="flex h-5 w-5 items-center justify-center rounded-md bg-white/[0.06] font-mono text-[10px] text-neutral-400">{i + 1}</span>
                 <span className="min-w-0 flex-1 truncate" title={f.name}>
                   {f.name}
                 </span>
@@ -151,10 +175,10 @@ export default function UploadPage() {
       </section>
 
       <fieldset>
-        <legend className="mb-1 text-sm font-medium text-neutral-300">What kind of video is it?</legend>
+        <legend className="rc-label mb-2">What kind of video is it?</legend>
         <div className="grid grid-cols-2 gap-2">
           {TYPES.map((t) => (
-            <label key={t.id} className={`cursor-pointer rounded-lg border px-3 py-2 text-sm ${type === t.id ? "border-sky-400 bg-sky-500/10" : "border-white/15 hover:bg-white/5"}`}>
+            <label key={t.id} className={`rc-lift cursor-pointer rounded-xl border px-3.5 py-2.5 text-sm ${type === t.id ? "border-sky-400/70 bg-sky-500/10 shadow-lg shadow-sky-950/40" : "border-white/[0.08] bg-white/[0.02] hover:border-white/20"}`}>
               <input type="radio" name="type" className="sr-only" checked={type === t.id} onChange={() => setType(t.id)} />
               <div className="font-medium">{t.label}</div>
               <div className="text-xs text-neutral-400">{t.hint}</div>
@@ -165,19 +189,20 @@ export default function UploadPage() {
 
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="block text-sm">
-          <span className="mb-1 block font-medium text-neutral-300">Target length (seconds, optional)</span>
-          <input value={target} onChange={(e) => setTarget(e.target.value)} inputMode="numeric" placeholder="e.g. 30" className="w-full rounded bg-neutral-800 px-2 py-1.5" />
+          <span className="rc-label mb-1.5 block">Target length (seconds, optional)</span>
+          <input value={target} onChange={(e) => setTarget(e.target.value)} inputMode="numeric" placeholder="e.g. 30" className="w-full rounded-lg bg-neutral-900 px-3 py-2" />
+          <span className="mt-1 block text-[11px] text-neutral-500">The keep/cut plan is fitted to this length.</span>
         </label>
         {!batch && (
           <label className="block text-sm">
-            <span className="mb-1 block font-medium text-neutral-300">Title (optional)</span>
-            <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} placeholder="defaults to the file name" className="w-full rounded bg-neutral-800 px-2 py-1.5" />
+            <span className="rc-label mb-1.5 block">Title (optional)</span>
+            <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} placeholder="defaults to the file name" className="w-full rounded-lg bg-neutral-900 px-3 py-2" />
           </label>
         )}
       </div>
 
       {error && (
-        <p role="alert" className="rounded bg-red-500/20 p-2 text-sm text-red-200">
+        <p role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 p-2.5 text-sm text-red-200">
           {error}
         </p>
       )}
@@ -186,7 +211,7 @@ export default function UploadPage() {
           {progress}
         </p>
       )}
-      <button type="submit" disabled={busy || files.length === 0} className="w-full rounded bg-sky-600 py-2 font-medium text-white hover:bg-sky-500 disabled:opacity-50">
+      <button type="submit" disabled={busy || files.length === 0} className="rc-press w-full rounded-xl bg-gradient-to-b from-sky-500 to-sky-600 py-2.5 font-medium text-white shadow-lg shadow-sky-900/50 ring-1 ring-white/10 hover:from-sky-400 hover:to-sky-500 disabled:opacity-40 disabled:shadow-none">
         {busy ? "Uploading…" : batch ? "Upload and auto-edit" : "Upload and analyse"}
       </button>
     </form>

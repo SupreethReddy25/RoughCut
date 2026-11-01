@@ -3,6 +3,10 @@
 clip_01_main.mp4   ~60s: long pauses, fillers (um/uh/like/you know), one retake
 clip_02_take_a.mp4 ~20s  } two takes meant to be joined as one video
 clip_03_take_b.mp4 ~20s  }
+clip_04_messy.mp4  ~60s: English stress test for the analysis: hesitations, um/uh, a stutter, hedges,
+                   a three-attempt restart chain, and a line said twice where the FIRST delivery is the clean one
+
+Run with --only clip_04_messy to (re)build a single clip.
 
 Run:  backend\\.venv\\Scripts\\python.exe scripts\\make_test_clips.py
 These are PLACEHOLDERS (synthetic voice, no face). Real face clips are needed for face tracking and the dataset.
@@ -60,6 +64,32 @@ TAKE_B = [
     ("say", "Second, uh, record in a quiet room."),
     ("pause", 1.3),
     ("say", "That is all, thanks for watching."),
+]
+
+MESSY = [
+    ("pause", 1.2),
+    ("say", "Okay, so today I am going to show you how I light my videos."),
+    ("pause", 0.9),
+    ("say", "The first thing you need is, um, a big soft light."),
+    ("pause", 0.35),
+    ("say", "Put it, uh, slightly to the side of your face."),
+    ("pause", 1.6),
+    ("say", "The second tip is to use"),            # attempt 1 (abandoned)
+    ("pause", 0.7),
+    ("say", "the second tip,"),                     # attempt 2 (abandoned)
+    ("pause", 0.5),
+    ("say", "The second tip is to use a darker background."),  # final take
+    ("pause", 0.8),
+    ("say", "I I think this is kind of the most underrated trick."),  # stutter + hedge
+    ("pause", 2.4),
+    ("say", "Lighting matters more than the camera you use."),  # clean take ...
+    ("pause", 0.9),
+    ("say", "Lighting matters, um, more than the, uh, camera you use."),  # ... worse repeat
+    ("pause", 0.6),
+    ("say", "Well, that is basically it for today."),
+    ("pause", 0.45),
+    ("say", "Let me know what you, like, want to see next."),
+    ("pause", 1.5),
 ]
 
 
@@ -124,13 +154,21 @@ def make_video(wav: Path, dur: float, title: str, out: Path) -> None:
 
 
 def main() -> None:
+    import argparse
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--only", default=None, help="build just this clip (e.g. clip_04_messy)")
+    only = ap.parse_args().only
     RAW.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp())
     for name, script, title in [
         ("clip_01_main", MAIN, "Clip 1 (main)"),
         ("clip_02_take_a", TAKE_A, "Clip 2 (take A)"),
         ("clip_03_take_b", TAKE_B, "Clip 3 (take B)"),
+        ("clip_04_messy", MESSY, "Clip 4 (messy English)"),
     ]:
+        if only and name != only:
+            continue
         wav = work / f"{name}.wav"
         dur = build_audio(script, wav, work)
         out = RAW / f"{name}.mp4"

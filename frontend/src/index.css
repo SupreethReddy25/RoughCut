@@ -1,1 +1,231 @@
 @import "tailwindcss";
+
+/*
+ * Design tokens. The app is written with Tailwind's `neutral-*` (surfaces, text) and `sky-*` (the one accent)
+ * scales, so redefining those two scales here restyles every screen consistently:
+ *   neutral  a cool graphite ramp (deep, slightly blue-black surfaces instead of pure #000)
+ *   sky      the RoughCut accent, an electric iris violet
+ * Semantic colours stay Tailwind's own: emerald = keep / accept, rose & red = cut / reject, amber = needs your eye.
+ */
+@theme {
+  --font-sans: "Inter", "Segoe UI Variable Text", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+
+  --color-neutral-50: #f7f7f9;
+  --color-neutral-100: #ededf1;
+  --color-neutral-200: #dcdce3;
+  --color-neutral-300: #babac6;
+  --color-neutral-400: #8d8d9c;
+  --color-neutral-500: #646473;
+  --color-neutral-600: #474753;
+  --color-neutral-700: #31313a;
+  --color-neutral-800: #222229;
+  --color-neutral-900: #16161b;
+  --color-neutral-950: #0c0c10;
+
+  --color-sky-50: #f3f1ff;
+  --color-sky-100: #e9e5ff;
+  --color-sky-200: #d5ceff;
+  --color-sky-300: #b8adff;
+  --color-sky-400: #9d8fff;
+  --color-sky-500: #8574ff;
+  --color-sky-600: #6f5cf6;
+  --color-sky-700: #5c48dc;
+  --color-sky-800: #4b3bb3;
+  --color-sky-900: #3a2f86;
+  --color-sky-950: #211a52;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: "cv11", "ss01";
+  }
+  body {
+    background: var(--color-neutral-950);
+    color: var(--color-neutral-100);
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--color-sky-500) 45%, transparent);
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-sky-400);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  label:has(> input[type="radio"]),
+  label:has(> input[type="checkbox"]) {
+    cursor: pointer;
+  }
+  button,
+  a {
+    transition-property: color, background-color, border-color, box-shadow, opacity, transform;
+    transition-duration: 140ms;
+    transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+  }
+  kbd {
+    font-family: var(--font-mono);
+  }
+  input[type="checkbox"],
+  input[type="radio"],
+  input[type="range"] {
+    accent-color: var(--color-sky-500);
+  }
+  input[type="text"],
+  input:not([type]),
+  input[type="number"],
+  select,
+  textarea {
+    border: 1px solid rgb(255 255 255 / 0.06);
+  }
+  input[type="text"]:focus,
+  input:not([type]):focus,
+  input[type="number"]:focus,
+  select:focus,
+  textarea:focus {
+    outline: none;
+    border-color: var(--color-sky-500);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-sky-500) 22%, transparent);
+  }
+
+  /* quiet scrollbars */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(255 255 255 / 0.14) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: rgb(255 255 255 / 0.12);
+    border: 3px solid transparent;
+    background-clip: padding-box;
+    border-radius: 999px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: rgb(255 255 255 / 0.22);
+  }
+  *::-webkit-scrollbar-track,
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}
+
+@layer components {
+  /* the brand wordmark gradient */
+  .rc-brand {
+    background: linear-gradient(100deg, #fff 10%, var(--color-sky-300) 95%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  /* a soft accent glow behind hero areas */
+  .rc-glow {
+    background:
+      radial-gradient(60% 50% at 50% 0%, color-mix(in oklab, var(--color-sky-600) 22%, transparent), transparent 70%),
+      var(--color-neutral-950);
+  }
+  /* raised panel surface */
+  .rc-panel {
+    background: linear-gradient(180deg, rgb(255 255 255 / 0.035), rgb(255 255 255 / 0.015));
+    border: 1px solid rgb(255 255 255 / 0.07);
+    border-radius: 14px;
+  }
+  .rc-label {
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-neutral-500);
+  }
+}
+
+/* motion: entrances fade up (stagger with an inline animation-delay), meters ease to their value */
+@keyframes rc-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes rc-pop {
+  0% {
+    transform: scale(0.96);
+    opacity: 0;
+  }
+  100% {
+    transform: none;
+    opacity: 1;
+  }
+}
+@keyframes rc-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.rc-in {
+  animation: rc-in 420ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.rc-pop {
+  animation: rc-pop 260ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.rc-breathe {
+  animation: rc-breathe 2.2s ease-in-out infinite;
+}
+.rc-meter {
+  transition: width 600ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.rc-lift {
+  transition:
+    transform 180ms cubic-bezier(0.2, 0, 0, 1),
+    border-color 180ms,
+    background-color 180ms,
+    box-shadow 180ms;
+}
+.rc-lift:hover {
+  transform: translateY(-1px);
+}
+.rc-press:active {
+  transform: scale(0.96);
+}
+
+@keyframes rc-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+.rc-shimmer {
+  animation: rc-shimmer 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rc-shimmer,
+  .rc-in,
+  .rc-pop,
+  .rc-breathe {
+    animation: none;
+  }
+  .rc-meter,
+  .rc-lift {
+    transition: none;
+  }
+  button,
+  a {
+    transition: none;
+  }
+}

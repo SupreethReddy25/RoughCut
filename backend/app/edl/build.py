@@ -129,8 +129,11 @@ def _removals(uf: UnitsFile, dec: Decisions, removed: list[bool], filler_removed
     pauses = [u for u in uf.units if u.kind == "pause"]
     cuts: list[tuple[float, float]] = []
     first, last = words[kept[0]], words[kept[-1]]
-    cuts.append((0.0, max(0.0, first.start - pad)))
-    cuts.append((min(uf.duration, last.end + pad), uf.duration))
+    # the padding around the first / last kept word must not bring back the tail of a removed neighbour
+    head_floor = words[kept[0] - 1].end if kept[0] > 0 else 0.0
+    tail_ceil = words[kept[-1] + 1].start if kept[-1] + 1 < len(words) else uf.duration
+    cuts.append((0.0, min(first.start, max(head_floor, first.start - pad))))
+    cuts.append((max(last.end, min(tail_ceil, last.end + pad)), uf.duration))
     for a, b in pairwise(kept):
         wa, wb = words[a], words[b]
         gone = list(range(a + 1, b))

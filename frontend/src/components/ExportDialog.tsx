@@ -89,8 +89,8 @@ export function ExportDialog({ projectId, styles, defaultPreset, onBeforeRender,
 
   const presets = styles ? Object.entries(styles.presets) : [];
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="Export">
-      <div className="w-full max-w-md rounded-xl bg-neutral-900 p-5 text-neutral-100 shadow-xl ring-1 ring-white/10">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Export">
+      <div className="rc-pop w-full max-w-md rounded-2xl bg-neutral-900 p-5 text-neutral-100 shadow-2xl shadow-black/60 ring-1 ring-white/10">
         <h2 className="mb-3 text-lg font-semibold">Export Reel</h2>
         {(phase.name === "idle" || phase.name === "failed") && (
           <>

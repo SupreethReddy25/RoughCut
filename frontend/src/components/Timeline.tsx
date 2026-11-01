@@ -59,6 +59,13 @@ const MAX_PPS = 120;
  * Timeline (PLAN Phase 4): clips with zoom badges and a confidence dot per clip, a ruler, the playhead, and the
  * text-overlay track. Click to seek; click a clip's dot to review its weakest decision.
  */
+// a tiled waveform texture for clips (bars of varying height, centred)
+const WAVE = `url("data:image/svg+xml,${encodeURIComponent(
+  `<svg xmlns='http://www.w3.org/2000/svg' width='30' height='40' preserveAspectRatio='none'>${[14, 26, 18, 34, 22, 10, 28, 16, 30, 20]
+    .map((h, i) => `<rect x='${i * 3}' y='${(40 - h) / 2}' width='1.6' height='${h}' rx='0.8' fill='white'/>`)
+    .join("")}</svg>`,
+)}")`;
+
 export function Timeline({ project, outTime, playing, selected, selectedText, onSeekOut, onSelect, onSelectText, onOverlayChange }: Props) {
   const edl = project.edl;
   const [drag, setDrag] = useState<{ id: string; t0: number; t1: number } | null>(null);
@@ -100,19 +107,19 @@ export function Timeline({ project, outTime, playing, selected, selectedText, on
   for (let t = 0; t <= duration; t += tick) ticks.push(t);
 
   return (
-    <div className="border-t border-white/10 bg-neutral-900/60" data-testid="timeline">
-      <div className="flex items-center gap-2 px-3 py-1 text-[11px] text-neutral-400">
-        <span className="font-semibold text-neutral-300">Timeline</span>
-        <span>{edl.clips.length} clips · {fmtTime(duration)}</span>
-        <div className="ml-auto flex items-center gap-1">
-          <button type="button" aria-label="Zoom timeline out" onClick={() => setPps((p) => Math.max(MIN_PPS, Math.round(p / 1.5)))} className="rounded bg-white/10 px-1.5 hover:bg-white/20">−</button>
-          <button type="button" aria-label="Zoom timeline in" onClick={() => setPps((p) => Math.min(MAX_PPS, Math.round(p * 1.5)))} className="rounded bg-white/10 px-1.5 hover:bg-white/20">+</button>
+    <div className="border-t border-white/[0.06] bg-neutral-900/70" data-testid="timeline">
+      <div className="flex items-center gap-2 px-3 pb-1 pt-1.5 text-[11px] text-neutral-400">
+        <span className="rc-label text-neutral-400">Timeline</span>
+        <span className="font-mono tabular-nums">{edl.clips.length} clips · {fmtTime(duration)}</span>
+        <div className="ml-auto flex items-center rounded-md bg-white/[0.04] p-0.5 ring-1 ring-white/[0.06]">
+          <button type="button" aria-label="Zoom timeline out" onClick={() => setPps((p) => Math.max(MIN_PPS, Math.round(p / 1.5)))} className="rc-press rounded px-2 hover:bg-white/10 hover:text-white">−</button>
+          <button type="button" aria-label="Zoom timeline in" onClick={() => setPps((p) => Math.min(MAX_PPS, Math.round(p * 1.5)))} className="rc-press rounded px-2 hover:bg-white/10 hover:text-white">+</button>
         </div>
       </div>
       <div ref={scroller} className="relative overflow-x-auto overflow-y-hidden pb-2" onClick={seek}>
         <div className="relative" style={{ width, height: 112 }}>
           {ticks.map((t) => (
-            <div key={t} className="absolute top-0 h-3 border-l border-white/20 pl-0.5 text-[9px] text-neutral-500" style={{ left: t * pps }}>
+            <div key={t} className="absolute top-0 h-3 border-l border-white/15 pl-1 font-mono text-[9px] text-neutral-500" style={{ left: t * pps }}>
               {fmtTime(t).replace(".0", "")}
             </div>
           ))}
@@ -125,12 +132,22 @@ export function Timeline({ project, outTime, playing, selected, selectedText, on
               <div
                 key={b.index}
                 data-testid={`clip-${b.index}`}
-                className={`absolute top-4 flex h-14 items-start justify-between overflow-hidden rounded border px-1 text-[10px] ${
-                  hasSel ? "border-sky-400 bg-sky-500/30" : b.zoom > 1 ? "border-violet-400/60 bg-violet-500/25" : "border-white/20 bg-white/10"
+                className={`absolute top-4 flex h-14 items-start justify-between overflow-hidden rounded-md border px-1 py-0.5 text-[10px] transition-colors ${
+                  hasSel
+                    ? "border-sky-400 bg-sky-500/25 shadow-[0_0_0_1px_rgb(157_143_255/0.5),0_6px_20px_-6px_rgb(111_92_246/0.6)]"
+                    : b.zoom > 1
+                      ? "border-sky-300/30 bg-sky-500/[0.14] hover:bg-sky-500/20"
+                      : "border-white/[0.09] bg-white/[0.06] hover:bg-white/[0.09]"
                 }`}
                 style={{ left: b.left * pps, width: Math.max(b.width * pps - 1, 2) }}
               >
-                {b.zoom > 1 ? <span className="rounded bg-violet-500 px-1 text-white">{b.zoom}×</span> : <span />}
+                {/* a waveform texture, so the track reads as audio/video at a glance */}
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-x-0 bottom-1.5 top-4 opacity-40"
+                  style={{ backgroundImage: WAVE, backgroundSize: "30px 100%", backgroundRepeat: "repeat-x" }}
+                />
+                {b.zoom > 1 ? <span className="relative rounded bg-sky-500 px-1 font-medium text-white shadow">{b.zoom}×</span> : <span />}
                 {weak && (
                   <button
                     type="button"
@@ -140,13 +157,13 @@ export function Timeline({ project, outTime, playing, selected, selectedText, on
                       e.stopPropagation();
                       onSelect(weak);
                     }}
-                    className={`mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-black/40 ${confidenceColor(weak.confidence)}`}
+                    className={`relative mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full ring-2 ring-neutral-950/70 transition-transform hover:scale-150 ${confidenceColor(weak.confidence)}`}
                   />
                 )}
               </div>
             );
           })}
-          <div className="absolute left-0 top-[78px] text-[9px] uppercase tracking-wide text-neutral-500">text</div>
+          <div className="absolute left-1 top-[78px] text-[9px] font-semibold uppercase tracking-wider text-neutral-600">text</div>
           {edl.texts.map((t) => {
             const a = drag?.id === t.id ? drag.t0 : t.t0;
             const b = drag?.id === t.id ? drag.t1 : t.t1;
@@ -189,8 +206,8 @@ export function Timeline({ project, outTime, playing, selected, selectedText, on
                   dragStart.current = null;
                   setDrag(null);
                 }}
-                className={`absolute top-[90px] h-5 touch-none truncate rounded px-1 text-left text-[10px] ${onOverlayChange ? "cursor-grab" : ""} ${
-                  selectedText === t.id ? "bg-amber-400 text-black" : "bg-amber-500/50 text-amber-50"
+                className={`absolute top-[90px] h-5 touch-none truncate rounded-md px-1.5 text-left text-[10px] font-medium ${onOverlayChange ? "cursor-grab active:cursor-grabbing" : ""} ${
+                  selectedText === t.id ? "bg-amber-300 text-neutral-950 shadow-lg shadow-amber-900/40" : "bg-amber-400/20 text-amber-100 ring-1 ring-amber-300/30 hover:bg-amber-400/30"
                 }`}
                 style={{ left: a * pps, width: Math.max((b - a) * pps, 12) }}
                 title={`${t.text} (drag to move, pull an end to resize)`}
@@ -201,9 +218,11 @@ export function Timeline({ project, outTime, playing, selected, selectedText, on
           })}
           <div
             data-testid="playhead"
-            className="pointer-events-none absolute top-0 h-full w-px bg-rose-400"
+            className="pointer-events-none absolute top-0 h-full w-px bg-rose-400 shadow-[0_0_8px_rgb(251_113_133/0.8)]"
             style={{ left: Math.min(outTime, duration) * pps }}
-          />
+          >
+            <span aria-hidden="true" className="absolute -left-[4px] -top-px h-2 w-[9px] rounded-b-sm bg-rose-400" />
+          </div>
         </div>
       </div>
     </div>

@@ -107,21 +107,20 @@ def sanitize_defaults(d: dict | None) -> dict:
 
 
 def hook_overlay(uf: UnitsFile) -> TextOverlay | None:
-    """The suggested title (PLAN 8.7): the first sentence of the talk, at most 8 words, shown for the first 3 s."""
-    first = next((u for u in uf.units if u.kind == "speech"), None)
-    if first is None:
-        return None
-    start = min((w.idx for w in uf.words if w.unit_id == first.id), default=None)
-    if start is None:
-        return None
+    """The suggested title (PLAN 8.7): the first sentence of the talk, at most 8 words, shown for the first 3 s.
+    Fillers ("So,") and abandoned takes are left out, so the title reads like what remains after the edit."""
+    skip = {u.id for u in uf.units if u.kind == "speech" and u.features.get("is_earlier_take", 0.0) >= 0.5}
     words: list[str] = []
-    for w in sorted((w for w in uf.words if w.idx >= start), key=lambda w: w.idx):  # across phrases: a sentence
+    for w in sorted(uf.words, key=lambda w: w.idx):  # across phrases: a sentence
+        if w.is_filler or w.unit_id in skip:
+            continue
         words.append(w.text_display.strip())
         if len(words) >= HOOK_MAX_WORDS or words[-1].endswith((".", "?", "!", "…")):
             break
     text = " ".join(x for x in words if x).rstrip(",;:.!?…- ").strip()
     if not text:
         return None
+    text = text[0].upper() + text[1:]
     return TextOverlay(id=HOOK_ID, text=text, t0=0.0, t1=HOOK_SECONDS, position="top", style_id="title")
 
 

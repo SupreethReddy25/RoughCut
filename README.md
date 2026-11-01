@@ -1,6 +1,12 @@
 # RoughCut
 
-Human-in-the-loop RL for personalized short-form video editing. See `PLAN.md` for the full design and `CLAUDE.md` for dev commands.
+Human-in-the-loop RL for personalized short-form video editing: upload a talking-head clip, get a first cut, correct it, and the per-creator agent learns your style. English speech only.
+
+**Run it:** `powershell -ExecutionPolicy Bypass -File start_demo.ps1` (opens http://127.0.0.1:8000).
+
+- `docs/DEMO.md`: presentation runbook, results and known limits
+- `PLAN.md`: full design
+- `CLAUDE.md`: dev commands and module map
 
 ## Test clips are placeholders
-`scripts/make_test_clips.py` generates synthetic clips (Windows TTS voice over a plain background, with pauses, fillers and a retake; two short "takes" for multi-clip join) into `data/raw/`. **Real face-to-camera clips are needed later** for face tracking, the dataset, and the user studies.
+`scripts/make_test_clips.py` generates synthetic clips (Windows TTS voice over a plain background) into `data/raw/`, including `clip_04_messy` (English stress test). Real face-to-camera clips are still needed for the dataset and the user studies.

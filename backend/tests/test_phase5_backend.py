@@ -60,7 +60,10 @@ def test_hook_overlay_is_the_first_sentence_capped_at_eight_words(client):
         return UnitsFile(video_id="v", duration=10, video_type="vlog", source_map=[], units=[unit], words=words)
 
     assert hook_overlay(uf(["so", "today", "we", "are", "going", "to", "talk", "about", "microphones", "in", "depth"])).text == \
-        "so today we are going to talk about"
+        "So today we are going to talk about"
+    no_filler = uf(["So,", "today", "we", "edit."])
+    no_filler.words[0].is_filler = True
+    assert hook_overlay(no_filler).text == "Today we edit"  # the title reads like what remains after the edit
     assert hook_overlay(uf(["Hello", "there.", "And", "more"])).text == "Hello there"  # stops at the sentence end
     assert hook_overlay(uf(["Wait,"])).text == "Wait"
     # the first sentence runs across phrases (a short "Okay," phrase on its own would make a poor title)
