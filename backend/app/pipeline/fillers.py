@@ -32,6 +32,7 @@ TOKENS = ["um", "uh", "like", "you_know", "so", "basically", "actually", "i_mean
 # "like" preceded by these is probably the verb/preposition ("I like it", "would like to", "to like")
 VERB_LIKE_PREV = {"i", "you", "we", "they", "would", "don't", "dont", "do", "to", "didn't", "didnt", "doesn't",
                   "he", "she", "who", "people", "really"}
+LIKE_AFTER_BE = {"was", "were", "is", "are", "am", "i'm", "it's", "he's", "she's", "they're", "we're", "you're", "been"}
 # "you know" preceded by these is a real clause ("do you know", "as you know")
 KNOW_PREV = {"do", "did", "if", "as", "that", "what", "don't", "dont", "didn't", "didnt", "and", "but"}
 VERB_LIKE_PREV |= {"look", "looks", "looked", "feel", "feels", "felt", "seem", "seems", "sound", "sounds", "something",
@@ -109,7 +110,12 @@ def find_fillers(words: list[Word], spans: list[tuple[int, int]]) -> list[Filler
                 if i == s0 or prev_raw.endswith(","):
                     g = FillerGroup([i], "so", which[i])
             elif tok == "like":
-                g = FillerGroup([i], "like", which[i], likely_verb_like=(prev in VERB_LIKE_PREV))
+                # only a discourse "like" is a filler: set off by commas, opening a phrase, or the quotative "was like".
+                # "looks like", "create it like the other" carry meaning, and cutting them breaks the sentence.
+                discourse = (words[i].text_original.rstrip().endswith(",") or prev_raw.endswith(",") or i == s0
+                             or prev in LIKE_AFTER_BE)
+                if discourse and prev not in VERB_LIKE_PREV:
+                    g = FillerGroup([i], "like", which[i])
             else:
                 g = FillerGroup([i], tok, which[i])
         if g:

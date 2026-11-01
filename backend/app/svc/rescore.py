@@ -28,6 +28,12 @@ RESCORE_SHARE = 0.25  # ... and so does one feedback event (live re-scoring)
 RESCORE_CONFIDENCE = 0.8  # live re-scoring only proposes an action Thompson sampling would pick this often
 
 
+def s_arms(decision_type: str) -> list[str]:
+    from app.policy import context
+
+    return context.ARMS[decision_type]
+
+
 def total_offsets(nudges: list[dict]) -> dict[str, dict[str, float]]:
     """Sum the per-arm score offsets of all active nudge events."""
     out: dict[str, dict[str, float]] = {}
@@ -66,7 +72,13 @@ def rescore(session: Session, b: Bundle, learner: Learner, event_id: int, nudge:
             continue  # the user has already looked at it: don't move things under their eyes
         ctx, dt = s.context_raw_json, s.decision_type
         off = offsets.get(dt)
-        scores = policy.mean_scores(dt, ctx)
+        if dt == "hook" or (dt == "rhythm" and not nudge):
+            continue  # those agents plan for the whole video: only a nudge moves a beat
+        if dt == "rhythm":  # the nudge decides between beats, with the current one slightly favoured
+            scores = {a: 0.0 for a in s_arms(dt)}
+            scores[b.action_of(s)] = 0.2
+        else:
+            scores = policy.mean_scores(dt, ctx)
         base_best = max(scores, key=lambda a: scores[a])  # the model's opinion without any nudge
         for arm, o in (off or {}).items():
             if arm in scores:
@@ -80,14 +92,14 @@ def rescore(session: Session, b: Bundle, learner: Learner, event_id: int, nudge:
                 continue  # differs from the model's opinion only through exploration, not through the nudge
         elif best == s.mean_best:
             continue  # the model's opinion has not changed since this suggestion was made (it was an exploration)
-        elif policy.choose(dt, ctx).probs.get(best, 0.0) < RESCORE_CONFIDENCE:
+        elif dt == "rhythm" or policy.choose(dt, ctx).probs.get(best, 0.0) < RESCORE_CONFIDENCE:
             continue  # the mean moved, but the model is not sure yet: leave the suggestion alone
         found.append((s, best, scores[best] - scores.get(current, scores[best])))
     found = _cap_nudge(found, Counter(s.decision_type for s in b.active), NUDGE_SHARE if nudge else RESCORE_SHARE)
     changes: list[ChangeOut] = []
     for s, best, _gain in found:
         ctx, dt = s.context_raw_json, s.decision_type
-        conf = policy.choose(dt, ctx, offsets.get(dt)).probs.get(best, 0.5)
+        conf = 0.8 if dt == "rhythm" else policy.choose(dt, ctx, offsets.get(dt)).probs.get(best, 0.5)
         new = SuggestionRow(
             video_id=s.video_id, target_id=s.target_id, decision_type=dt, proposed_action=best,
             candidates_json=list(s.candidates_json), context_raw_json=dict(ctx), propensity=1.0, confidence=conf,

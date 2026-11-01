@@ -15,7 +15,8 @@ from app.schemas import AudioSpec, MusicSpec, OutputSpec, TextOverlay, UnitsFile
 
 SPEEDS = (1.0, 1.1, 1.15, 1.25)
 CAPTION_POSITIONS = ("lower_third", "center", "top")
-NEUTRAL = {"pause": "KEEP", "zoom": "NONE", "emphasis": "NONE"}  # what "reject without an alternative" leaves
+NEUTRAL = {"pause": "KEEP", "zoom": "NONE", "emphasis": "NONE", "rhythm": "NONE", "pace": "S100", "hook": "NONE",
+           "music_timing": "FROM_START"}  # what "reject without an alternative" leaves
 GAIN_RANGE = (-40.0, -6.0)  # background music level under the voice, dB
 DUCK_RANGE = (-24.0, 0.0)  # how far the music dips while the voice speaks, dB (0 = no ducking)
 HOOK_ID = "hook"  # the suggested title (PLAN 8.7); a normal overlay once it is in the state
@@ -124,6 +125,19 @@ def hook_overlay(uf: UnitsFile) -> TextOverlay | None:
     return TextOverlay(id=HOOK_ID, text=text, t0=0.0, t1=HOOK_SECONDS, position="top", style_id="title")
 
 
+def chosen_hook_overlay(uf: UnitsFile, action: str | None) -> TextOverlay | None:
+    """The title for the hook decision's action (None: no title)."""
+    from app.rl.hook import candidates
+
+    if not action or action == "NONE":
+        return None
+    cands = candidates(uf)
+    k = int(action.split("_")[1])
+    if k >= len(cands) or not cands[k]["text"]:
+        return None
+    return TextOverlay(id=HOOK_ID, text=cands[k]["text"], t0=0.0, t1=HOOK_SECONDS, position="top", style_id="title")
+
+
 def validate_speed(value) -> float:
     try:
         v = float(value)
@@ -140,6 +154,14 @@ def base_decisions(active: list) -> Decisions:
     for s in active:
         if s.decision_type == "zoom":
             dec.zoom[s.target_id] = s.proposed_action
+        elif s.decision_type == "rhythm":
+            dec.rhythm[s.target_id] = s.proposed_action
+        elif s.decision_type == "pace":
+            dec.pace[s.target_id] = s.proposed_action
+        elif s.decision_type == "hook":
+            dec.hook = s.proposed_action
+        elif s.decision_type == "music_timing":
+            dec.music_timing = s.proposed_action
         elif s.decision_type == "emphasis":
             if s.proposed_action != "NONE":
                 dec.emphasis.add(int(s.context_raw_json[f"c{s.proposed_action.split('_')[1]}_word_id"]))
@@ -152,7 +174,14 @@ def apply_event(st: EditState, kind: str, payload: dict, uf: UnitsFile) -> None:
     """Apply one (non-undone) event to the state."""
     if kind in ("override", "reject", "fine_cut"):
         if "mapping" in payload:
-            apply_mapping(st.decisions, mapping_from_payload(payload["mapping"]), uf)
+            m = mapping_from_payload(payload["mapping"])
+            apply_mapping(st.decisions, m, uf)
+            if m.decision_type == "hook":
+                ov = chosen_hook_overlay(uf, m.final_action)
+                if ov is None:
+                    st.texts.pop(HOOK_ID, None)
+                else:
+                    st.texts[HOOK_ID] = ov
     elif kind == "speed":
         st.speed = float(payload["value"])
     elif kind == "setting":
@@ -186,7 +215,7 @@ def rebuild(uf: UnitsFile, active_suggestions: list, events: list, defaults: dic
             setattr(st, key, d[key])
     if d.get("music"):
         st.music = MusicSpec(**d["music"])
-    hook = hook_overlay(uf)
+    hook = chosen_hook_overlay(uf, st.decisions.hook) if st.decisions.hook else hook_overlay(uf)
     if hook is not None:
         st.texts[hook.id] = hook
     for ev in events:
@@ -198,6 +227,14 @@ def current_action(st: EditState, decision_type: str, target_id: int, ctx: dict)
     """The action that is in the edit right now for a suggestion's target."""
     if decision_type == "zoom":
         return st.decisions.zoom.get(target_id, "NONE")
+    if decision_type == "rhythm":
+        return st.decisions.rhythm.get(target_id, "NONE")
+    if decision_type == "pace":
+        return st.decisions.pace.get(target_id, "S100")
+    if decision_type == "hook":
+        return st.decisions.hook or "NONE"
+    if decision_type == "music_timing":
+        return st.decisions.music_timing or "FROM_START"
     if decision_type == "emphasis":
         for k in range(int(ctx.get("n_cand", 0))):
             if int(ctx[f"c{k}_word_id"]) in st.decisions.emphasis:

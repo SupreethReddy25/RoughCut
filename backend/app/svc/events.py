@@ -317,7 +317,14 @@ def _remember_defaults(session: Session, b: Bundle, events: list[EventRow]) -> N
         session.add(user)
 
 
-BUILDERS = {"accept": _explicit, "reject": _explicit, "override": _explicit, "manual": _manual, "nudge": _nudge,
+def _rating(b: Bundle, body: EventIn) -> list[EventRow]:
+    value = body.payload.get("value")
+    if value not in (-1, 0, 1):
+        raise ApiError(422, "rating needs payload.value of -1, 0 or 1")
+    return [_event(b, "rating", None, {"value": value})]
+
+
+BUILDERS = {"rating": _rating, "accept": _explicit, "reject": _explicit, "override": _explicit, "manual": _manual, "nudge": _nudge,
             "crop": _crop, "caption_text": _caption_text, "text_overlay": _text_overlay, "speed": _speed,
             "setting": _setting}
 
@@ -369,7 +376,7 @@ def _handle(ctx: AppContext, session: Session, b: Bundle, body: EventIn) -> Stat
     for e in events:
         if e.kind in LEARNED_KINDS:
             learner.apply_event(suggestion_from_row(b.sug_by_id[e.suggestion_id]), event_from_row(e))
-    if b.video.status in ("ready", "exported"):
+    if b.video.status in ("ready", "exported") and body.kind != "rating":  # a verdict does not change the edit
         b.video.status = "edited"
     b.video.updated_at = time.time()
     session.add(b.video)

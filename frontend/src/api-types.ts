@@ -2,7 +2,7 @@
 import type { EDL, Unit, Word, VideoType } from "./types";
 
 export type SuggestionStatus = "pending" | "accepted" | "corrected";
-export type DecisionKind = "phrase" | "pause" | "zoom" | "filler" | "emphasis";
+export type DecisionKind = "phrase" | "pause" | "zoom" | "filler" | "emphasis" | "rhythm" | "pace" | "hook" | "music_timing";
 
 export interface UserOut {
   id: number;
@@ -18,6 +18,8 @@ export interface SuggestionOut {
   current_action: string;
   candidates: string[];
   candidate_word_ids: number[];
+  /** hook: the text of each candidate */
+  candidate_texts?: string[];
   confidence: number;
   propensity: number;
   explored: boolean;
@@ -116,6 +118,16 @@ export interface ProjectSummary {
   expected_corrections: number | null;
 }
 
+export interface AnalysisProgressOut {
+  stages: { key: string; label: string; state: "done" | "running" | "waiting"; seconds: number }[];
+  fraction: number;
+  seconds_left: number;
+  video_seconds: number;
+  /** the estimate comes from earlier analyses on this computer */
+  learned: boolean;
+  waiting: boolean;
+}
+
 export interface ProjectOut extends ProjectSummary, Omit<StateOut, "status"> {
   source_map: Record<string, unknown>[];
   units: Unit[];
@@ -124,6 +136,9 @@ export interface ProjectOut extends ProjectSummary, Omit<StateOut, "status"> {
   exports: Record<string, ExportInfo>;
   job: JobOut | null;
   source: { width: number; height: number };
+  progress?: AnalysisProgressOut | null;
+  /** the creator's verdict at export */
+  rating?: number | null;
 }
 
 export interface FinalizeOut extends StateOut {
@@ -261,7 +276,8 @@ export interface EventIn {
     | "text_overlay"
     | "speed"
     | "setting"
-    | "music";
+    | "music"
+    | "rating";
   suggestion_id?: number;
   final_action?: string;
   edit?: ManualEditIn;

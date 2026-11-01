@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import type { EventIn, ManualEditIn, ProjectOut, SuggestionOut } from "../api-types";
 import { CaptionStrip } from "../components/CaptionStrip";
+import { AnalysisProgress } from "../components/AnalysisProgress";
 import { CaptionStylePanel } from "../components/CaptionStylePanel";
+import { ComparePanel, type CompareHandle } from "../components/ComparePanel";
+import { SfxPreview } from "../components/SfxPreview";
 import { ExportDialog } from "../components/ExportDialog";
 import { MusicPanel } from "../components/MusicPanel";
 import { MusicPreview } from "../components/MusicPreview";
@@ -65,6 +68,19 @@ export function TargetChip({ duration, target }: { duration: number; target: num
   );
 }
 
+/** How long the upload was, how long the edit is. */
+export function DurationChip({ before, after }: { before: number; after: number }) {
+  const saved = before > 0 ? Math.max(0, Math.round((1 - after / before) * 100)) : 0;
+  return (
+    <span title="Length of your upload, then of this edit" data-testid="duration-chip" className="inline-flex items-center gap-1.5 rounded-md bg-white/[0.05] px-2 py-0.5 font-mono text-xs tabular-nums text-neutral-300 ring-1 ring-white/[0.06]">
+      {fmtClock(before)} <span aria-hidden="true" className="text-neutral-500">→</span> <span className="text-white">{fmtClock(after)}</span>
+      {saved > 0 && <span className="text-emerald-300">−{saved}%</span>}
+    </span>
+  );
+}
+
+const fmtClock = (t: number) => `${Math.floor(t / 60)}:${String(Math.round(t % 60)).padStart(2, "0")}`.replace(/:60$/, ":59");
+
 export default function EditorPage() {
   const id = Number(useParams().id);
   if (!Number.isInteger(id) || id <= 0) return <Notice title="Project not found" />;
@@ -125,18 +141,8 @@ function Editor({ id }: { id: number }) {
   }
   if (project.status === "uploaded" || project.status === "processing") {
     return (
-      <Notice title="Analysing your video…" text="Transcribing, finding pauses and filler words. This takes a little while.">
-        <div className="relative mx-auto h-1.5 w-56 overflow-hidden rounded-full bg-white/[0.07]">
-          <div className="rc-shimmer absolute inset-y-0 w-1/3 rounded-full bg-gradient-to-r from-transparent via-sky-400 to-transparent" />
-        </div>
-        <ol className="mx-auto mt-6 grid max-w-xs gap-2 text-left text-xs text-neutral-400">
-          {["Transcribe every word", "Align words to the audio", "Find pauses, fillers and retakes", "Ask your agent for a first cut"].map((t, i) => (
-            <li key={t} className="rc-in flex items-center gap-2" style={{ animationDelay: `${150 + i * 120}ms` }}>
-              <span aria-hidden="true" className="rc-breathe h-1.5 w-1.5 rounded-full bg-sky-400" style={{ animationDelay: `${i * 300}ms` }} />
-              {t}
-            </li>
-          ))}
-        </ol>
+      <Notice title="Analysing your video…">
+        <AnalysisProgress id={project.id} progress={project.progress ?? null} />
       </Notice>
     );
   }
@@ -170,6 +176,8 @@ function Workspace({ api, project }: { api: ProjectApi; project: Ready }) {
   const [showSafe, setShowSafe] = useState(false);
   const [reframe, setReframe] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [comparing, setComparing] = useState(false);
+  const compare = useRef<CompareHandle>(null);
 
   const units = useMemo(() => new Map(project.units.map((u) => [u.id, u])), [project.units]);
   const words = useMemo(() => new Map(project.words.map((w) => [w.id, w])), [project.words]);
@@ -296,7 +304,12 @@ function Workspace({ api, project }: { api: ProjectApi; project: Ready }) {
   }, []);
 
   const beforeRender = useCallback(async () => (await live.current.api.finalize(activeSeconds())) !== null, [activeSeconds]);
-  const nPending = project.suggestions.filter((s) => s.status === "pending").length;
+  const nPending = project.queue.needs_review.length;
+  const playBoth = useCallback(() => {
+    player.current?.seekOut(0);
+    compare.current?.playFromStart();
+    player.current?.play();
+  }, []);
 
   return (
     <div className="flex h-screen flex-col bg-neutral-950 text-neutral-100">
@@ -312,7 +325,8 @@ function Workspace({ api, project }: { api: ProjectApi; project: Ready }) {
         <span className="rounded-md bg-white/[0.05] px-2 py-0.5 font-mono text-xs tabular-nums text-neutral-300 ring-1 ring-white/[0.06]">
           {fmtTime(time.out)} <span className="text-neutral-600">/</span> {fmtTime(project.edl.duration)}
         </span>
-        <span className="text-xs text-neutral-400">{nPending} to review</span>
+        <DurationChip before={project.duration} after={project.edl.duration} />
+        <span className="text-xs text-neutral-400">{nPending} need{nPending === 1 ? "s" : ""} you</span>
         {project.target_duration ? <TargetChip duration={project.edl.duration} target={project.target_duration} /> : null}
         {api.busy > 0 && (
           <span className="flex items-center gap-1.5 text-xs text-amber-300">
@@ -329,6 +343,7 @@ function Workspace({ api, project }: { api: ProjectApi; project: Ready }) {
               ↷ Redo
             </button>
           </div>
+          <Toggle checked={comparing} onChange={setComparing} label="Compare" hint="See the original next to the edit. The review panel moves below them." />
           <Toggle checked={showSafe} onChange={setShowSafe} label="Safe zones" hint="Show where the Reels / Shorts buttons cover the video" />
           <Toggle checked={reframe} onChange={setReframe} label="Reframe" hint="Drag the video inside the 9:16 frame to move the crop" />
           <button
@@ -354,9 +369,15 @@ function Workspace({ api, project }: { api: ProjectApi; project: Ready }) {
         </div>
       )}
 
-      {/* wide: preview | transcript | panel. laptop: preview | transcript, panel below. narrow: stacked, page scrolls */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto md:grid-cols-[minmax(220px,280px)_minmax(0,1fr)] xl:grid-cols-[minmax(240px,320px)_minmax(0,1fr)_minmax(300px,360px)] xl:overflow-hidden">
-        <div className="flex h-[78vh] min-h-0 flex-col items-center gap-2.5 overflow-y-auto border-white/[0.06] bg-[radial-gradient(80%_60%_at_50%_30%,rgb(111_92_246/0.10),transparent_70%)] p-3 md:h-[64vh] md:border-r xl:h-auto">
+      {/* wide and laptop: preview | transcript | panel, so the video stays beside the review. Comparing: original | edit |
+          transcript with the panel below. Narrow: stacked, the page scrolls. */}
+      <div className={`grid min-h-0 flex-1 grid-cols-1 overflow-y-auto md:grid-cols-[minmax(220px,280px)_minmax(0,1fr)] lg:overflow-hidden ${
+        comparing
+          ? "lg:grid-cols-[minmax(0,1.2fr)_minmax(200px,0.8fr)_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)_minmax(0,32vh)]"
+          : "lg:grid-cols-[minmax(200px,270px)_minmax(0,1fr)_minmax(290px,340px)] xl:grid-cols-[minmax(240px,320px)_minmax(0,1fr)_minmax(320px,380px)]"
+      }`}>
+        {comparing && <ComparePanel ref={compare} projectId={project.id} before={project.duration} after={project.edl.duration} srcTime={time.src} onPlayBoth={playBoth} />}
+        <div className="flex h-[78vh] min-h-0 flex-col items-center gap-2.5 overflow-y-auto border-white/[0.06] bg-[radial-gradient(80%_60%_at_50%_30%,rgb(111_92_246/0.10),transparent_70%)] p-3 md:h-[64vh] md:border-r lg:h-auto">
           <div className="relative min-h-0 w-full flex-1">
             <PreviewPlayer
               ref={player}
@@ -377,9 +398,10 @@ function Workspace({ api, project }: { api: ProjectApi; project: Ready }) {
           {!fontsReady && <p className="text-[10px] text-neutral-500">Loading caption fonts…</p>}
           <CaptionStrip project={project} outTime={time.out} onEdit={onEdit} />
           {user && <MusicPreview edl={project.edl} userId={user.id} time={time} />}
+          <SfxPreview edl={project.edl} time={time} />
         </div>
 
-        <div className="h-[64vh] min-h-0 overflow-y-auto border-t border-white/[0.06] md:border-t-0 xl:h-auto">
+        <div className="h-[64vh] min-h-0 overflow-y-auto border-t border-white/[0.06] md:border-t-0 lg:h-auto">
           <TranscriptEditor
             ref={transcript}
             project={project}
@@ -393,7 +415,7 @@ function Workspace({ api, project }: { api: ProjectApi; project: Ready }) {
           />
         </div>
 
-        <div className="flex h-[80vh] min-h-0 flex-col border-t border-white/[0.06] bg-neutral-950 md:col-span-2 xl:col-span-1 xl:h-auto xl:border-l xl:border-t-0">
+        <div className={`flex h-[80vh] min-h-0 flex-col border-t border-white/[0.06] bg-neutral-950 md:col-span-2 lg:h-auto ${comparing ? "lg:col-span-3" : "lg:col-span-1 lg:border-l lg:border-t-0"}`}>
           <div className="p-2 pb-0">
             <div className="flex rounded-lg bg-white/[0.04] p-0.5 text-sm ring-1 ring-white/[0.06]" role="tablist">
               {(["review", "style", "music"] as const).map((t) => (
@@ -477,6 +499,8 @@ function Workspace({ api, project }: { api: ProjectApi; project: Ready }) {
           defaultPreset={PRESET}
           onBeforeRender={beforeRender}
           onRendered={() => void api.reload()}
+          onRate={(value) => void send({ kind: "rating", payload: { value } })}
+          rating={project.rating ?? null}
           onClose={() => setExporting(false)}
         />
       )}

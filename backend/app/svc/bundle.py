@@ -16,6 +16,9 @@ from app.state import EditState, current_action, rebuild
 
 EXPLICIT = ("accept", "reject", "override")  # events that mean "the user looked at this suggestion and decided"
 NEEDS_EYE_BELOW = 0.7  # PLAN 7.3
+# Cosmetic decisions are many (one highlight per caption line) and a wrong one costs little, so only the few the agent is
+# least sure of ask for attention. The others stay reviewable under the spot-check list.
+NEEDS_EYE_CAP = {"emphasis": 2, "pace": 2, "rhythm": 4, "zoom": 4}
 
 
 class ApiError(Exception):
@@ -43,6 +46,8 @@ class Bundle:
 
     def unit_of(self, s: SuggestionRow) -> int | None:
         """The unit a suggestion is about (for 'seen' tracking). Emphasis: the unit of its first candidate word."""
+        if s.decision_type in ("hook", "music_timing"):
+            return None  # about the whole video
         if s.decision_type != "emphasis":
             return s.target_id
         wid = s.context_raw_json.get("c0_word_id")
@@ -89,7 +94,7 @@ def load_bundle(ctx: AppContext, session: Session, video_pk: int) -> Bundle:
 
 # --------------------------------------------------------------------------- undo / redo availability
 def undoable(e: EventRow) -> bool:
-    return e.kind != "implicit"  # finalize's implicit accepts are bookkeeping, not user actions
+    return e.kind not in ("implicit", "rating")  # bookkeeping and a verdict on an export, not edits
 
 
 def undo_target(b: Bundle) -> EventRow | None:
@@ -109,19 +114,32 @@ def suggestion_out(b: Bundle, s: SuggestionRow) -> SuggestionOut:
     unit = b.unit_of(s)
     ctx = s.context_raw_json
     cand_ids = [int(ctx[f"c{k}_word_id"]) for k in range(int(ctx.get("n_cand", 0)))] if s.decision_type == "emphasis" else []
+    texts: list[str] = []
+    if s.decision_type == "hook" and b.analysis is not None:
+        from app.rl.hook import candidates
+
+        texts = [c["text"] for c in candidates(b.analysis.uf)]
     return SuggestionOut(
         id=s.id, decision_type=s.decision_type, target_id=s.target_id, proposed_action=s.proposed_action,
-        current_action=b.action_of(s), candidates=list(s.candidates_json), candidate_word_ids=cand_ids,
+        current_action=b.action_of(s), candidates=list(s.candidates_json), candidate_word_ids=cand_ids, candidate_texts=texts,
         confidence=s.confidence, propensity=s.propensity, explored=s.explored, source=s.source,
         status=b.status_of(s), unit_id=unit, seen=unit in b.seen_units if unit is not None else False)
 
 
 def queue_out(b: Bundle) -> QueueOut:
     """PLAN 7.3: pending suggestions only; priority = 1 - confidence; 'needs your eye' = confidence < 0.7."""
-    pending = [s for s in b.active if b.status_of(s) == "pending"]
+    pending = [s for s in b.active if b.status_of(s) == "pending"
+               and (s.decision_type != "music_timing" or b.state.music is not None)]  # no music: nothing to decide
     pending.sort(key=lambda s: (-(1 - s.confidence), s.id))
-    return QueueOut(needs_review=[s.id for s in pending if s.confidence < NEEDS_EYE_BELOW],
-                    confident=[s.id for s in pending if s.confidence >= NEEDS_EYE_BELOW])
+    needs, rest, used = [], [], {}
+    for s in pending:  # least confident first
+        cap = NEEDS_EYE_CAP.get(s.decision_type)
+        if s.confidence < NEEDS_EYE_BELOW and (cap is None or used.get(s.decision_type, 0) < cap):
+            used[s.decision_type] = used.get(s.decision_type, 0) + 1
+            needs.append(s.id)
+        else:
+            rest.append(s.id)
+    return QueueOut(needs_review=needs, confident=rest)
 
 
 def style_out(learner: Learner | None) -> StyleOut | None:

@@ -28,6 +28,8 @@ class Learner:
     def apply(self, decision_type: str, ctx: dict[str, float], proposed: str, kind: str,
               final: str | None = None, arms: list[str] | None = None, manual: bool = False) -> list[Update]:
         """Turn one event on a suggestion into updates and apply them. Returns what was applied."""
+        if decision_type in context.AGENT_TYPES:
+            return []  # those agents are rebuilt from the log (app/rl)
         arms = arms or context.arms_for(decision_type, ctx)
         ups = updates_for(kind, decision_type, proposed, arms, final, self.cfg, manual)
         for u in ups:

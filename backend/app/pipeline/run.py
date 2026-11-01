@@ -40,11 +40,31 @@ def run_pipeline(inputs: list[str | Path], video_id: str | None = None, video_ty
     def step(name: str, t0: float, extra: str = "") -> None:
         progress(f"[{time.time() - t0:5.1f}s] {name} {extra}".rstrip())
 
+    marks: dict = {"started": {}, "done": {}, "current": None}
+
+    def mark(stage: str | None) -> None:
+        """Stage timings for the analysing screen (svc/progress.py). Best effort: never fails an analysis."""
+        now = time.time()
+        if marks["current"]:
+            marks["done"][marks["current"]] = round(now - marks["started"][marks["current"]], 2)
+        marks["current"] = stage
+        if stage:
+            marks["started"][stage] = now
+        try:
+            tmp = out / "progress.tmp"
+            tmp.write_text(json.dumps(marks), encoding="utf-8")
+            tmp.replace(out / "progress.json")
+        except OSError:
+            pass
+
+    mark("ingest")
+
     t0 = time.time()
     ing = ingest.ingest(paths, out)
     step("ingest", t0, f"{len(paths)} clip(s) -> {ing.width}x{ing.height}, {ing.duration:.2f}s")
     take_bounds = [m["out_start"] for m in ing.source_map[1:]]
 
+    mark("transcribe")
     t0 = time.time()
     tr = transcribe.transcribe(ing.wav, model_size=whisper_model)
     detected = transcribe.detect_language(ing.wav)
@@ -55,6 +75,7 @@ def run_pipeline(inputs: list[str | Path], video_id: str | None = None, video_ty
     if not tr["words"]:
         progress("warning: no speech detected - the video has nothing to edit")
 
+    mark("align")
     t0 = time.time()
     words = transcribe.words_from_transcript(tr)
     en = pauses.energy_from_wav(ing.wav)
@@ -72,11 +93,13 @@ def run_pipeline(inputs: list[str | Path], video_id: str | None = None, video_ty
     step("pauses+segment+fillers", t0,
          f"{len(spans)} phrases, {len(pause_spans)} pauses, {len(groups)} fillers (thr {en.thr:.1f} dB)")
 
+    mark("vision")
     t0 = time.time()
     samples, n_sampled = vision.track_faces(ing.proxy)
     (out / "face_track.json").write_text(json.dumps(vision.track_to_json(samples, n_sampled)), encoding="utf-8")
     step("vision", t0, f"{len(samples)}/{int(n_sampled)} sampled frames had a face")
 
+    mark("semantic")
     t0 = time.time()
     texts = [" ".join(w.text_display for w in words[a:b] if not w.is_filler) or " ".join(
         w.text_display for w in words[a:b]) for a, b in spans]
@@ -91,6 +114,7 @@ def run_pipeline(inputs: list[str | Path], video_id: str | None = None, video_ty
     (out / "units.json").write_text(uf.model_dump_json(indent=1), encoding="utf-8")
     (out / "word_features.json").write_text(
         json.dumps({str(k): v for k, v in word_feats.items()}, indent=0), encoding="utf-8")
+    mark(None)
     progress(f"done in {time.time() - t_all:.1f}s -> {out}")
     return uf
 

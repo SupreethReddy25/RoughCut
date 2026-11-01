@@ -11,6 +11,9 @@ interface Props {
   onBeforeRender: () => Promise<boolean>;
   /** after a render finished (the project's export list changed) */
   onRendered: () => void;
+  /** the one-tap verdict on the finished video: the rhythm agent's delayed reward */
+  onRate?: (value: -1 | 0 | 1) => void;
+  rating?: number | null;
   onClose: () => void;
 }
 
@@ -24,7 +27,7 @@ type Phase =
 const POLL_MS = 800;
 
 /** Finalize + render + download (PLAN 12): "without leaving the app". */
-export function ExportDialog({ projectId, styles, defaultPreset, onBeforeRender, onRendered, onClose }: Props) {
+export function ExportDialog({ projectId, styles, defaultPreset, onBeforeRender, onRendered, onRate, rating, onClose }: Props) {
   const [preset, setPreset] = useState(defaultPreset);
   const [phase, setPhase] = useState<Phase>({ name: "idle" });
   const alive = useRef(true);
@@ -132,6 +135,18 @@ export function ExportDialog({ projectId, styles, defaultPreset, onBeforeRender,
               Done: {fmtDuration(phase.duration)} long.
             </p>
             {phase.warning && <p className="mb-2 rounded bg-amber-500/20 p-2 text-sm text-amber-200">{phase.warning}</p>}
+            {onRate && (
+              <div className="mb-3 rounded-lg bg-white/[0.04] p-2.5 ring-1 ring-white/[0.06]" data-testid="export-rating">
+                <p className="mb-1.5 text-xs text-neutral-400">How does this edit feel? It teaches your agent the rhythm you like.</p>
+                <div className="flex gap-1.5">
+                  {([[1, "👍", "Great"], [0, "😐", "Okay"], [-1, "👎", "Not me"]] as const).map(([v, icon, label]) => (
+                    <button key={v} type="button" aria-pressed={rating === v} onClick={() => onRate(v)} className={`rc-press flex-1 rounded-md px-2 py-1.5 text-sm ring-1 ${rating === v ? "bg-sky-500/25 text-sky-100 ring-sky-400/50" : "bg-white/[0.04] text-neutral-300 ring-white/10 hover:bg-white/[0.08]"}`}>
+                      <span aria-hidden="true">{icon}</span> {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="flex flex-wrap justify-end gap-2">
               <a
                 href={downloadUrl(projectId, "srt", phase.preset)}

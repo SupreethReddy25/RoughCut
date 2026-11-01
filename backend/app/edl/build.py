@@ -29,6 +29,7 @@ from app.schemas import (
     Clip,
     OutputSpec,
     Point,
+    SfxCue,
     TextOverlay,
     UnitsFile,
     Word,
@@ -38,6 +39,10 @@ PAD = 0.04
 FILLER_PAD = 0.02
 PAUSE_TARGET = {"TIGHT_40": 0.40, "TIGHT_15": 0.15, "REMOVE": 0.03}
 ZOOM_VALUE = {"NONE": 1.0, "Z115": 1.15, "Z130": 1.30}
+PACE_VALUE = {"S100": 1.0, "S110": 1.1, "S125": 1.25}
+POP_SECONDS = 1.4
+POP_Y = 0.34
+INTRO_MAX = 12.0  # AFTER_INTRO: the music waits for the first sentence, but never longer than this
 
 LINE_MAX_WORDS = 4
 LINE_MAX_SECONDS = 1.4
@@ -59,6 +64,10 @@ class Decisions:
     # edit-only manual changes (PLAN 6.4): never learned, but they shape the EDL
     caption_text: dict[int, str] = field(default_factory=dict)  # word id -> corrected caption text
     crop: dict[int, tuple[float, float]] = field(default_factory=dict)  # first speech unit of a clip -> crop centre
+    rhythm: dict[int, str] = field(default_factory=dict)  # speech unit id -> NONE|Z115|Z130|TEXT_POP|SFX
+    pace: dict[int, str] = field(default_factory=dict)  # speech unit id -> S100|S110|S125
+    hook: str | None = None  # CAND_k | NONE
+    music_timing: str | None = None  # FROM_START | AFTER_INTRO
 
     def action(self, unit_id: int) -> str:
         return self.actions.get(unit_id, "KEEP")
@@ -163,14 +172,14 @@ def _median_center(samples: list[FaceSample], t0: float, t1: float) -> tuple[flo
     return statistics.median(s.cx for s in hit), statistics.median(s.cy for s in hit)
 
 
-def _split_on_zoom(ranges: list[tuple[float, float]], kept_words: list[Word], zoom_of_unit: dict[int, float]
+def _split_on_zoom(ranges: list[tuple[float, float]], kept_words: list[Word], zoom_of_unit: dict
                    ) -> list[tuple[float, float]]:
-    """Split kept ranges where consecutive phrases (both inside the same range) use a different zoom."""
+    """Split kept ranges where consecutive phrases (both inside the same range) use a different zoom or pace."""
     splits: list[float] = []
     prev: Word | None = None
     for w in kept_words:
         if prev is not None and w.unit_id != prev.unit_id and \
-                zoom_of_unit.get(w.unit_id, 1.0) != zoom_of_unit.get(prev.unit_id, 1.0):
+                zoom_of_unit.get(w.unit_id) != zoom_of_unit.get(prev.unit_id):
             splits.append((prev.end + w.start) / 2)
         prev = w
     out = []
@@ -206,6 +215,57 @@ def group_caption_lines(items: list[dict]) -> list[list[dict]]:
     return lines
 
 
+# --------------------------------------------------------------------------- rhythm beats and music timing
+def pop_text(words: list[Word]) -> str:
+    """The word(s) a text pop-up shows: a number with what follows it, else the longest word that says something."""
+    from app.pipeline.semantic import STOPWORDS
+
+    clean = [(w.text_display.strip().strip(".,;:!?\"'“”…—-"), w) for w in words if not w.is_filler]
+    clean = [(t, w) for t, w in clean if t]
+    for k, (t, _) in enumerate(clean):
+        if any(ch.isdigit() for ch in t):
+            return " ".join(x for x, _ in clean[k:k + 2]).upper()
+    good = [t for t, _ in clean if t.lower() not in STOPWORDS]
+    return max(good or [t for t, _ in clean] or [""], key=len).upper()
+
+
+def _first_kept_word(kept_words: list[Word]) -> dict[int, list[Word]]:
+    out: dict[int, list[Word]] = {}
+    for w in kept_words:
+        out.setdefault(w.unit_id, []).append(w)
+    return out
+
+
+def _pops(uf: UnitsFile, dec: Decisions, kept_words: list[Word], remap: Remap) -> list[TextOverlay]:
+    if not any(a == "TEXT_POP" for a in dec.rhythm.values()):
+        return []
+    by_unit = _first_kept_word(kept_words)
+    out = []
+    for uid, action in sorted(dec.rhythm.items()):
+        ws = by_unit.get(uid)
+        if action != "TEXT_POP" or not ws:
+            continue
+        text = pop_text(ws)
+        if not text:
+            continue
+        t0 = remap.src_to_out(ws[0].start, "next")
+        out.append(TextOverlay(id=f"pop_{uid}", text=text, t0=_r(t0), t1=_r(min(t0 + POP_SECONDS, remap.duration)),
+                               position="custom", y=POP_Y, style_id="title"))
+    return [t for t in out if t.t1 > t.t0]
+
+
+def _audio(uf: UnitsFile, dec: Decisions, audio: AudioSpec, kept_words: list[Word], remap: Remap) -> AudioSpec:
+    by_unit = _first_kept_word(kept_words)
+    sfx = [SfxCue(t0=_r(remap.src_to_out(by_unit[uid][0].start, "next")))
+           for uid, a in sorted(dec.rhythm.items()) if a == "SFX" and uid in by_unit]
+    music = audio.music
+    if music is not None and dec.music_timing == "AFTER_INTRO":
+        end = next((w for w in kept_words if w.text_display.strip().endswith(_SENTENCE_END)), None)
+        start = remap.src_to_out(end.end, "prev") if end is not None else 0.0
+        music = music.model_copy(update={"start_s": _r(start if start <= min(INTRO_MAX, remap.duration / 2) else 0.0)})
+    return audio.model_copy(update={"music": music, "sfx": sfx})
+
+
 # --------------------------------------------------------------------------- main entry
 def build_edl(uf: UnitsFile, dec: Decisions, face_samples: list[FaceSample] | None = None,
               options: BuildOptions | None = None) -> EDL:
@@ -223,8 +283,10 @@ def build_edl_with_lines(uf: UnitsFile, dec: Decisions, face_samples: list[FaceS
     total = uf.duration  # never past the end of the media (a clip beyond the last frame would render short)
     ranges = subtract_ranges((0.0, total), cuts)
 
-    zoom_of_unit = {u.id: ZOOM_VALUE[dec.zoom.get(u.id, "NONE")] for u in uf.units if u.kind == "speech"}
-    ranges = _split_on_zoom(ranges, kept_words, zoom_of_unit)
+    zoom_of_unit = {u.id: ZOOM_VALUE[dec.zoom.get(u.id, dec.rhythm.get(u.id) if dec.rhythm.get(u.id) in ZOOM_VALUE else "NONE")]
+                    for u in uf.units if u.kind == "speech"}
+    pace_of_unit = {u.id: PACE_VALUE.get(dec.pace.get(u.id, "S100"), 1.0) for u in uf.units if u.kind == "speech"}
+    ranges = _split_on_zoom(ranges, kept_words, {i: (zoom_of_unit[i], pace_of_unit[i]) for i in zoom_of_unit})
     # snap clip edges to the output frame grid: ffmpeg's trim works in whole frames, so off-grid edges would
     # make every clip up to one frame longer than the EDL says
     fps = opt.output.fps
@@ -247,9 +309,10 @@ def build_edl_with_lines(uf: UnitsFile, dec: Decisions, face_samples: list[FaceS
         if sp_ids and sp_ids[0] in dec.crop:  # manual crop drag for the clip that starts with this phrase
             c = dec.crop[sp_ids[0]]
         clips.append(Clip(src_start=a, src_end=b, zoom=zoom_of_unit.get(sp_ids[0], 1.0) if sp_ids else 1.0,
-                          crop_center=Point(x=round(c[0], 4), y=round(c[1], 4)), unit_ids=sorted(ids)))
+                          crop_center=Point(x=round(c[0], 4), y=round(c[1], 4)), unit_ids=sorted(ids),
+                          speed=pace_of_unit.get(sp_ids[0], 1.0) if sp_ids else 1.0))
 
-    remap = Remap(ranges, opt.speed)
+    remap = Remap(ranges, opt.speed, [c.speed for c in clips])
     items = []
     for w in kept_words:
         o0 = remap.src_to_out(w.start, "next")
@@ -270,7 +333,8 @@ def build_edl_with_lines(uf: UnitsFile, dec: Decisions, face_samples: list[FaceS
         video_id=uf.video_id, output=out, clips=clips,
         captions=Captions(enabled=opt.captions_enabled, style_id=opt.caption_style,
                           position=opt.caption_position, lines=lines),  # type: ignore[arg-type]
-        texts=list(opt.texts), audio=opt.audio, duration=_r(remap.duration),
+        texts=[*opt.texts, *_pops(uf, dec, kept_words, remap)], audio=_audio(uf, dec, opt.audio, kept_words, remap),
+        duration=_r(remap.duration),
     )
     return edl, line_ids
 

@@ -9,10 +9,10 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 VideoType = Literal["tutorial", "vlog", "opinion", "other"]
-DecisionType = Literal["phrase", "pause", "zoom", "filler", "emphasis", "hook"]
+DecisionType = Literal["phrase", "pause", "zoom", "filler", "emphasis", "hook", "rhythm", "pace", "music_timing"]
 UnitKind = Literal["speech", "pause", "filler"]
 
 # Action vocabularies per decision type (PLAN 6.2)
@@ -20,6 +20,9 @@ PHRASE_ACTIONS = ["KEEP", "CUT"]
 PAUSE_ACTIONS = ["KEEP", "TIGHT_40", "TIGHT_15", "REMOVE"]
 ZOOM_ACTIONS = ["NONE", "Z115", "Z130"]
 FILLER_ACTIONS = ["KEEP", "REMOVE"]
+RHYTHM_ACTIONS = ["NONE", "Z115", "Z130", "TEXT_POP", "SFX"]
+PACE_ACTIONS = ["S100", "S110", "S125"]
+MUSIC_TIMING_ACTIONS = ["FROM_START", "AFTER_INTRO"]
 # emphasis / hook actions are "NONE" or "CAND_<k>" (k = 0..2)
 
 
@@ -77,6 +80,7 @@ class Clip(BaseModel):
     zoom: float = 1.0
     crop_center: Point = Point(x=0.5, y=0.5)
     unit_ids: list[int] = Field(default_factory=list)
+    speed: float = 1.0  # this clip's own pace, on top of OutputSpec.speed
 
 
 class CaptionWord(BaseModel):
@@ -113,12 +117,19 @@ class MusicSpec(BaseModel):
     track_id: str
     gain_db: float = -18.0
     duck_db: float = -10.0
+    start_s: float = 0.0  # output time the music comes in
+
+
+class SfxCue(BaseModel):
+    t0: float  # output time
+    name: str = "whoosh"
 
 
 class AudioSpec(BaseModel):
     enhance: bool = True
     target_lufs: float = -14.0
     music: MusicSpec | None = None
+    sfx: list[SfxCue] = Field(default_factory=list)
 
 
 class EDL(BaseModel):
@@ -153,7 +164,7 @@ class Suggestion(BaseModel):
 
 EventKind = Literal[
     "accept", "reject", "override", "implicit",
-    "fine_cut", "crop", "caption_text", "text_overlay", "music", "speed", "nudge", "setting",
+    "fine_cut", "crop", "caption_text", "text_overlay", "music", "speed", "nudge", "setting", "rating",
 ]
 
 

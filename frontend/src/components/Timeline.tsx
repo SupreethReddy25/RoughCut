@@ -164,7 +164,7 @@ export function Timeline({ project, outTime, playing, selected, selectedText, on
             );
           })}
           <div className="absolute left-1 top-[78px] text-[9px] font-semibold uppercase tracking-wider text-neutral-600">text</div>
-          {edl.texts.map((t) => {
+          {edl.texts.filter((t) => !t.id.startsWith("pop_")).map((t) => {
             const a = drag?.id === t.id ? drag.t0 : t.t0;
             const b = drag?.id === t.id ? drag.t1 : t.t1;
             return (

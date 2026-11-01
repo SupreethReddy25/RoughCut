@@ -1,7 +1,7 @@
 """Source-time <-> output-time math for an EDL (PLAN 5: "the timing math lives in one place").
 
-An EDL is an ordered list of kept source ranges plus a global speed. Output time of a source instant t that
-falls in kept range k is  (sum of earlier range lengths + (t - range_k.start)) / speed.
+An EDL is an ordered list of kept source ranges, each with its own pace, plus a global speed. Output time of a source
+instant t in kept range k is  (sum of earlier (length / pace) + (t - range_k.start) / pace_k) / speed.
 """
 from __future__ import annotations
 
@@ -33,20 +33,22 @@ def subtract_ranges(total: tuple[float, float], removals: list[tuple[float, floa
 class Remap:
     ranges: list[tuple[float, float]]  # kept source ranges, in order, non-overlapping
     speed: float = 1.0
+    paces: list[float] | None = None  # per range, default 1
     _starts: list[float] = field(init=False, repr=False)
     _offsets: list[float] = field(init=False, repr=False)  # pre-speed output offset of each range
 
     def __post_init__(self) -> None:
         self._starts = [r[0] for r in self.ranges]
         acc, self._offsets = 0.0, []
-        for a, b in self.ranges:
+        self._paces = list(self.paces) if self.paces else [1.0] * len(self.ranges)
+        for (a, b), p in zip(self.ranges, self._paces, strict=True):
             self._offsets.append(acc)
-            acc += b - a
+            acc += (b - a) / p
         self._total = acc
 
     @classmethod
     def from_edl(cls, edl: EDL) -> Remap:
-        return cls([(c.src_start, c.src_end) for c in edl.clips], edl.output.speed)
+        return cls([(c.src_start, c.src_end) for c in edl.clips], edl.output.speed, [c.speed for c in edl.clips])
 
     @property
     def duration(self) -> float:
@@ -69,9 +71,10 @@ class Remap:
         k = self.locate(t)
         if k is not None:
             a, _ = self.ranges[k]
-            return (self._offsets[k] + (min(max(t, a), self.ranges[k][1]) - a)) / self.speed
+            return (self._offsets[k] + (min(max(t, a), self.ranges[k][1]) - a) / self._paces[k]) / self.speed
         j = bisect.bisect_right(self._starts, t)  # first range starting after t
-        prev_end = self._offsets[j - 1] + (self.ranges[j - 1][1] - self.ranges[j - 1][0]) if j > 0 else 0.0
+        prev_end = (self._offsets[j - 1] + (self.ranges[j - 1][1] - self.ranges[j - 1][0]) / self._paces[j - 1]
+                    if j > 0 else 0.0)
         next_start = self._offsets[j] if j < len(self.ranges) else self._total
         if snap == "next":
             out = next_start
@@ -90,4 +93,4 @@ class Remap:
         x = min(max(o * self.speed, 0.0), self._total)
         k = max(0, bisect.bisect_right(self._offsets, x + EPS) - 1)
         a, b = self.ranges[k]
-        return min(a + (x - self._offsets[k]), b)
+        return min(a + (x - self._offsets[k]) * self._paces[k], b)

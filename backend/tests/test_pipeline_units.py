@@ -155,8 +155,9 @@ def test_filler_so_only_at_discourse_position():
 
 
 def test_like_verb_vs_filler_and_you_know_clause():
-    _, g = find("I like pizza")
-    assert [(x.token, x.likely_verb_like) for x in g] == [("like", True)]
+    assert find("I like pizza")[1] == []
+    assert find("what it looks like to edit")[1] == []
+    assert find("we create it like the other")[1] == []
     _, g = find("it was like really big")
     assert [(x.token, x.likely_verb_like) for x in g] == [("like", False)]
     _, g = find("do you know the answer")

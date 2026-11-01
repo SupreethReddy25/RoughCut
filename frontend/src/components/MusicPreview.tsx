@@ -20,8 +20,9 @@ export function MusicPreview({ edl, userId, time }: { edl: EDL; userId: number; 
     const a = ref.current;
     if (!a || !music) return;
     const len = isFinite(a.duration) && a.duration > 0 ? a.duration : 0;
-    if (time.playing) {
-      const want = musicPosition(time.out, len);
+    const start = music.start_s ?? 0;
+    if (time.playing && time.out >= start) {
+      const want = musicPosition(time.out - start, len);
       if (a.paused) {
         if (len) a.currentTime = want;
         void Promise.resolve(a.play()).catch(() => undefined); // blocked by the browser until the user has interacted

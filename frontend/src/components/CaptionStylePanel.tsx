@@ -24,7 +24,7 @@ const POSITIONS: { id: string; label: string }[] = [
 /** Caption style, position, speed, audio and the text-overlay tool (PLAN 8.2, 8.3, 8.7). */
 export function CaptionStylePanel({ project, styles, outTime, selectedText, onSelectText, onSetting, onSpeed, onOverlay }: Props) {
   const st = project.settings;
-  const texts = project.edl?.texts ?? [];
+  const texts = (project.edl?.texts ?? []).filter((t) => !t.id.startsWith("pop_")); // pop-ups belong to the rhythm decisions
   return (
     <div className="space-y-4 overflow-y-auto p-3 text-sm" data-testid="style-panel">
       <section>

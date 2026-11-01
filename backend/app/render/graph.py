@@ -13,6 +13,7 @@ from pathlib import Path
 from app.schemas import EDL, Clip
 
 FADE = 0.008  # 8 ms at every cut (PLAN 8.3)
+SFX_SECONDS = 0.22
 
 
 @dataclass
@@ -34,6 +35,7 @@ class MusicMix:
     gain_db: float
     duck_db: float
     duration: float  # output duration to fill
+    start: float = 0.0  # output time the music comes in
 
 
 def duck_ratio(duck_db: float) -> float:
@@ -51,11 +53,12 @@ def duck_threshold(duck_db: float) -> float:
 
 def music_chain(mix: MusicMix) -> list[str]:
     """Filter-graph lines that turn input 1 + the voice [vox] into the mix [mix]."""
-    d = max(mix.duration, 0.1)
+    d = max(mix.duration - mix.start, 0.1)
     fade = min(MUSIC_FADE, d / 2)
     lines = ["[vox]aformat=channel_layouts=stereo,asplit=2[vkey][vmix]",
              (f"[1:a]aformat=channel_layouts=stereo,aresample=48000,atrim=0:{d:.4f},asetpts=PTS-STARTPTS,"
-             f"volume={mix.gain_db:.1f}dB,afade=t=in:st=0:d={fade:.3f},afade=t=out:st={d - fade:.4f}:d={fade:.3f}[mus]")]
+             f"volume={mix.gain_db:.1f}dB,afade=t=in:st=0:d={fade:.3f},afade=t=out:st={d - fade:.4f}:d={fade:.3f}"
+              + (f",adelay={round(mix.start * 1000)}:all=1" if mix.start > 0 else "") + "[mus]")]
     if mix.duck_db < 0:
         lines.append(f"[mus][vkey]sidechaincompress=threshold={duck_threshold(mix.duck_db)}:ratio={duck_ratio(mix.duck_db)}:"
                      f"attack={DUCK_ATTACK_MS}:release={DUCK_RELEASE_MS}[musd]")
@@ -64,6 +67,18 @@ def music_chain(mix: MusicMix) -> list[str]:
         lines.append("[vkey]anullsink")
         music = "mus"
     lines.append(f"[vmix][{music}]amix=inputs=2:duration=first:normalize=0[mix]")
+    return lines
+
+
+def sfx_chain(edl: EDL) -> list[str]:
+    """Soft whooshes (filtered noise, nothing to license) mixed into the voice [vox] -> [voxs]."""
+    lines, labels = [], ""
+    for i, cue in enumerate(edl.audio.sfx):
+        lines.append(f"anoisesrc=d={SFX_SECONDS}:c=pink:a=0.3:r=48000,aformat=channel_layouts=stereo,highpass=f=600,"
+                     f"lowpass=f=6000,afade=t=in:st=0:d=0.05,afade=t=out:st=0.05:d={SFX_SECONDS - 0.05:.2f},"
+                     f"adelay={round(cue.t0 * 1000)}:all=1[sfx{i}]")
+        labels += f"[sfx{i}]"
+    lines.append(f"[vox]{labels}amix=inputs={len(edl.audio.sfx) + 1}:duration=first:normalize=0[voxs]")
     return lines
 
 
@@ -110,11 +125,12 @@ def build_filter_complex(edl: EDL, src: SourceInfo, *, ass_path: str | Path | No
             x, y, w, h = crop_rect(c, src, ow, oh)
             # frame-index trim: exact frame counts (clip edges are on the 30 fps grid, see edl/build.py)
             parts.append(f"[0:v]trim=start_frame={round(c.src_start * fps)}:end_frame={round(c.src_end * fps)},"
-                         f"setpts=PTS-STARTPTS,"
+                         f"setpts=(PTS-STARTPTS)/{c.speed:.6f},"
                          f"crop={w}:{h}:{x}:{y},scale={ow}:{oh}:flags=lanczos,setsar=1[v{i}]")
             cat += f"[v{i}]"
         parts.append(f"[0:a]atrim=start={c.src_start:.4f}:end={c.src_end:.4f},asetpts=PTS-STARTPTS,"
-                     f"afade=t=in:st=0:d={fd:.4f},afade=t=out:st={dur - fd:.4f}:d={fd:.4f}[a{i}]")
+                     f"afade=t=in:st=0:d={fd:.4f},afade=t=out:st={dur - fd:.4f}:d={fd:.4f}"
+                     + (f",atempo={c.speed:.6f}" if abs(c.speed - 1.0) > 1e-9 else "") + f"[a{i}]")
         cat += f"[a{i}]"
     n = len(edl.clips)
     parts.append(f"{cat}concat=n={n}:v={1 if video else 0}:a=1" + ("[vc][ac]" if video else "[ac]"))
@@ -132,11 +148,22 @@ def build_filter_complex(edl: EDL, src: SourceInfo, *, ass_path: str | Path | No
     if abs(speed - 1.0) > 1e-9:
         achain.append(f"atempo={speed:.6f}")
     achain += audio_chain or []
+    sfx = sfx_chain(edl) if edl.audio.sfx else []
     if music is None:
-        achain += post_chain or []
-        parts.append("[ac]" + (",".join(achain) if achain else "anull") + "[ao]")
+        if sfx:
+            parts.append("[ac]" + (",".join(achain) if achain else "anull") + "[vox]")
+            parts += sfx
+            parts.append("[voxs]" + (",".join(post_chain) if post_chain else "anull") + "[ao]")
+        else:
+            achain += post_chain or []
+            parts.append("[ac]" + (",".join(achain) if achain else "anull") + "[ao]")
     else:
         parts.append("[ac]" + (",".join(achain) if achain else "anull") + "[vox]")
-        parts += music_chain(music)
+        if sfx:
+            parts += sfx
+            parts.append("[voxs]anull[vox2]")
+            parts += [ln.replace("[vox]", "[vox2]", 1) for ln in music_chain(music)]
+        else:
+            parts += music_chain(music)
         parts.append("[mix]" + (",".join(post_chain) if post_chain else "anull") + "[ao]")
     return ";\n".join(parts), vlabel, "ao"

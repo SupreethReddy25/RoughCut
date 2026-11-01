@@ -73,7 +73,7 @@ def updates_for(kind: str, decision_type: str, proposed: str, arms: list[str], f
 def nudge_offsets(name: str, magnitude: float = 0.5) -> dict[str, dict[str, float]]:
     """Per-decision-type arm score offsets for a global nudge button (applied for this video only)."""
     snappy = {"pause": {"TIGHT_15": 1.0, "REMOVE": 1.0}, "phrase": {"CUT": 1.0}, "filler": {"REMOVE": 1.0}}
-    zooms = {"zoom": {"Z115": 1.0, "Z130": 1.0}}
+    zooms = {"zoom": {"Z115": 1.0, "Z130": 1.0}, "rhythm": {"Z115": 1.0, "Z130": 0.8}}
     table = {"snappier": (snappy, 1), "calmer": (snappy, -1), "more_zooms": (zooms, 1), "fewer_zooms": (zooms, -1)}
     if name not in table:
         raise ValueError(f"unknown nudge {name!r}")
@@ -218,6 +218,14 @@ def apply_mapping(dec: Decisions, m: Mapping, uf: UnitsFile) -> None:
     if m.kind == "override":
         if m.decision_type == "zoom":
             dec.zoom[m.target_id] = m.final_action
+        elif m.decision_type == "rhythm":
+            dec.rhythm[m.target_id] = m.final_action
+        elif m.decision_type == "pace":
+            dec.pace[m.target_id] = m.final_action
+        elif m.decision_type == "hook":
+            dec.hook = m.final_action
+        elif m.decision_type == "music_timing":
+            dec.music_timing = m.final_action
         elif m.decision_type == "emphasis":
             dec.emphasis -= set(m.word_ids)
             if m.word_id is not None:

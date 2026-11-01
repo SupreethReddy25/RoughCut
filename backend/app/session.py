@@ -25,6 +25,7 @@ from app.policy.base import Choice, Policy
 from app.schemas import EDL, Suggestion, Unit, UnitsFile, Word
 
 FEATURE_VERSION = context.CONTEXT_VERSION
+ZOOM_NEVER_S = 30.0  # seconds-since-a-visual-change before the first one
 
 
 @dataclass
@@ -50,10 +51,19 @@ class SuggestionSet:
     mean_best: list[str] = field(default_factory=list)  # per suggestion: the posterior-mean argmax when it was made
 
 
+# A new decision type starts with no learned weights, so ties would be broken at random. These keep the plain choice
+# unless the creator's feedback says otherwise.
+DEFAULT_OFFSETS = {"pace": {"S100": 0.8}, "music_timing": {"FROM_START": 0.4}}
+
+
 class EditSession:
     def __init__(self, uf: UnitsFile, word_feats: dict[int, dict[str, float]] | None = None,
-                 video_type: str | None = None):
+                 video_type: str | None = None, agents: bool = False):
         self.uf = uf
+        self.agents = agents  # the product's decision set: rhythm + pace per phrase, hook + music timing per video
+        self._last_visual_t: float | None = None
+        self._last_visual = 0
+        self._streak = 0
         self.word_feats = word_feats or {}
         self.video_type = video_type or uf.video_type
         self.decisions = Decisions()
@@ -89,7 +99,12 @@ class EditSession:
         }
 
     def _item(self, dt: str, u: Unit, word_ids: list[int]) -> Item:
-        ctx = context.build_context(u.features, self._hist(), self.video_type)
+        hist = self._hist()
+        if dt == "rhythm":
+            since = (self._phrase_out_start - self._last_visual_t if self._last_visual_t is not None else ZOOM_NEVER_S)
+            hist.update(hist_since_visual=min(max(since, 0.0), ZOOM_NEVER_S), hist_last_visual=float(self._last_visual),
+                        hist_streak=float(self._streak))
+        ctx = context.build_context(u.features, hist, self.video_type)
         return Item(dt, u.id, ctx, context.arms_for(dt), u, word_ids)
 
     # ------------------------------------------------------------------ generation
@@ -115,8 +130,15 @@ class EditSession:
                     continue
                 yield self._item("filler", fu, [w.id for w in self._words_of.get(su.id, [])
                                                 if w.is_filler and fu.start - 1e-3 <= w.start and w.end <= fu.end + 1e-3])
-            yield self._item("zoom", su, [w.id for w in self._words_of.get(su.id, [])])
+            if self.agents:
+                ids = [w.id for w in self._words_of.get(su.id, [])]
+                yield self._item("rhythm", su, ids)
+                yield self._item("pace", su, ids)
+            else:
+                yield self._item("zoom", su, [w.id for w in self._words_of.get(su.id, [])])
         yield from self._emphasis_items()
+        if self.agents:
+            yield from self._video_items()
 
     def _emphasis_items(self) -> Iterator[Item]:
         _, line_ids = build_edl_with_lines(self.uf, self.decisions)
@@ -127,6 +149,18 @@ class EditSession:
                 continue
             ctx, cand = built
             yield Item("emphasis", idx, ctx, context.arms_for("emphasis", ctx), None, list(cand), cand, list(ids))
+
+    def _video_items(self) -> Iterator[Item]:
+        from app.rl import hook
+
+        cands = hook.candidates(self.uf)
+        if cands:
+            ctx = hook.context_of(cands)
+            yield Item("hook", 0, ctx, hook.arms_of(ctx))
+        first_end = next((w.end for w in self.uf.words if w.text_display.strip().endswith((".", "?", "!"))), 0.0)
+        ctx = {**context.type_onehot(self.video_type), "bias": 1.0, "video_minutes": self.uf.duration / 60.0,
+               "first_sentence_seconds": first_end - self._t0}
+        yield Item("music_timing", 0, ctx, list(context.ARMS["music_timing"]))
 
     # ------------------------------------------------------------------ commit
     def commit(self, item: Item, action: str) -> None:
@@ -153,6 +187,20 @@ class EditSession:
             self.decisions.actions[item.target_id] = action
             if action == "REMOVE":
                 self._out_t -= u.features.get("token_duration", 0.0)
+        elif dt == "rhythm":
+            self.decisions.rhythm[item.target_id] = action
+            if action == "NONE":
+                self._streak = 0
+            else:
+                self._streak += 1
+                self._last_visual_t = self._phrase_out_start
+                self._last_visual = {"Z115": 1, "Z130": 1, "TEXT_POP": 2, "SFX": 3}[action]
+        elif dt == "pace":
+            self.decisions.pace[item.target_id] = action
+        elif dt == "hook":
+            self.decisions.hook = action
+        elif dt == "music_timing":
+            self.decisions.music_timing = action
         elif dt == "zoom":
             self.decisions.zoom[item.target_id] = action
             self._prev_zoomed = action != "NONE"
@@ -168,6 +216,14 @@ class EditSession:
         dt = item.decision_type
         if dt == "zoom":
             d.zoom[item.target_id] = action
+        elif dt == "rhythm":
+            d.rhythm[item.target_id] = action
+        elif dt == "pace":
+            d.pace[item.target_id] = action
+        elif dt == "hook":
+            d.hook = action
+        elif dt == "music_timing":
+            d.music_timing = action
         elif dt == "emphasis":
             if action != "NONE":
                 d.emphasis.add(item.candidate_word_ids[int(action.split("_")[1])])
@@ -182,7 +238,7 @@ class EditSession:
 def make_suggestion(item: Item, choice: Choice, policy: Policy, video_id: str, source: str = "policy") -> Suggestion:
     return Suggestion(
         video_id=video_id, target_id=item.target_id, decision_type=item.decision_type,  # type: ignore[arg-type]
-        proposed_action=choice.action, candidates=list(item.arms) if item.decision_type == "emphasis" else [],
+        proposed_action=choice.action, candidates=list(item.arms) if item.decision_type in ("emphasis", "hook") else [],
         context_raw={k: float(v) for k, v in item.ctx.items()}, propensity=choice.propensity,
         confidence=choice.confidence, explored=choice.explored, source=source,  # type: ignore[arg-type]
         policy_name=policy.name, policy_version=policy.version, feature_version=FEATURE_VERSION,
@@ -227,27 +283,46 @@ def planned_choice(planner, item: Item, sess: EditSession) -> tuple[Choice, str]
 def suggest(uf: UnitsFile, word_feats: dict[int, dict[str, float]] | None, policy: Policy, *,
             video_type: str | None = None, offsets: dict[str, dict[str, float]] | None = None,
             source: str = "policy", greedy: bool = False, target: float | None = None,
-            seed: int = 0) -> SuggestionSet:
+            seed: int = 0, rhythm=None, hook=None) -> SuggestionSet:
     """Run `policy` over the whole video (every proposal is applied), returning suggestions + decisions.
     `greedy` = no exploration: the posterior mean decides (autopilot). With a `target` duration the phrase and
-    pause decisions come from the episode planner (posterior sampling over the whole edit, app/rl/plan.py)."""
-    sess = EditSession(uf, word_feats, video_type)
+    pause decisions come from the episode planner (posterior sampling over the whole edit, app/rl/plan.py).
+    With `rhythm` and `hook` agents the product's decision set is used (see EditSession.agents)."""
+    agents = rhythm is not None
+    sess = EditSession(uf, word_feats, video_type, agents=agents)
+    if agents:
+        rhythm.begin_video()
     planner = make_planner(uf, sess.video_type, policy, target, greedy=greedy, offsets=offsets, seed=seed)
     sugs, items, best = [], [], []
     for item in sess.items():
         off = (offsets or {}).get(item.decision_type)
+        if item.decision_type in DEFAULT_OFFSETS:
+            off = {**DEFAULT_OFFSETS[item.decision_type], **(off or {})}
         planned = planned_choice(planner, item, sess)
+        agent_name = None
         if planned is not None:
             choice, mean_a = planned
+            best.append(mean_a)
+        elif item.decision_type == "rhythm":
+            choice, agent_name = rhythm.choose(item.ctx), rhythm.name
+            best.append(rhythm.mean_action(item.ctx))
+        elif item.decision_type == "hook":
+            choice, mean_a = hook.choose(item.ctx)
+            agent_name = hook.name
             best.append(mean_a)
         else:
             choice = (greedy_choice(policy, item.decision_type, item.ctx, off) if greedy
                       else policy.choose(item.decision_type, item.ctx, off))
             scores = policy.mean_scores(item.decision_type, item.ctx)
+            for arm, o in (off or {}).items():
+                if arm in scores:
+                    scores[arm] += o
             best.append(max(scores, key=lambda a: scores[a]))
         sug = make_suggestion(item, choice, policy, uf.video_id, source)
         if planned is not None:
             sug.policy_name += PLANNER_TAG
+        if agent_name:
+            sug.policy_name = agent_name
         sugs.append(sug)
         items.append(item)
         sess.commit(item, choice.action)
