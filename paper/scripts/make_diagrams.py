@@ -9,8 +9,8 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-from matplotlib.patches import FancyArrowPatch, FancyBboxPatch  # noqa: E402
+import matplotlib.pyplot as plt
+from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
 
 F = Path(__file__).resolve().parents[1] / "figures"
 plt.rcParams.update({"font.family": "Arial", "pdf.fonttype": 42, "mathtext.fontset": "stix"})

@@ -13,12 +13,11 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
-
-from sim.experiments.common import make_learner, style_mixture, videos_for  # noqa: E402
-from sim.personas import BASE_PERSONAS, make_persona  # noqa: E402
-from sim.session import run_user  # noqa: E402
+import matplotlib.pyplot as plt
+import numpy as np
+from sim.experiments.common import make_learner, style_mixture, videos_for
+from sim.personas import BASE_PERSONAS, make_persona
+from sim.session import run_user
 
 ROOT = Path(__file__).resolve().parents[1]
 plt.rcParams.update({"font.family": "Arial", "font.size": 8, "axes.labelsize": 8, "legend.fontsize": 6.5, "xtick.labelsize": 7,

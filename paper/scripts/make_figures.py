@@ -11,9 +11,9 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
-from scipy import stats  # noqa: E402
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy import stats
 
 ROOT = Path(__file__).resolve().parents[1]
 D, F = ROOT / "data", ROOT / "figures"

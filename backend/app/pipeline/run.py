@@ -113,7 +113,7 @@ def run_pipeline(inputs: list[str | Path], video_id: str | None = None, video_ty
         marks["live"]["heard_fraction"] = round(at / total, 3) if total else 0.0
         publish()
 
-    tr = transcribe.transcribe(ing.wav, model_size=whisper_model, on_text=heard)
+    tr = transcribe.transcribe_isolated(ing.wav, model_size=whisper_model, on_text=heard)
     detected = transcribe.detect_language(ing.wav)
     if detected:
         tr["detected_language"], tr["detected_language_prob"] = detected[0], round(detected[1], 3)

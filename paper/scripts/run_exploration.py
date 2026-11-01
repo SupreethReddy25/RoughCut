@@ -14,7 +14,6 @@ from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
 
 import numpy as np
-
 from sim.experiments.common import make_learner, style_mixture, videos_for
 from sim.personas import BASE_PERSONAS, make_persona
 from sim.session import GreedyView, evaluate, run_user

@@ -1,9 +1,13 @@
 """Transcription (PLAN 12): faster-whisper base.en int8 CPU, word timestamps, disfluency prompt."""
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
+import subprocess
+import sys
+from pathlib import Path
 
 import numpy as np
 
@@ -54,6 +58,30 @@ def transcribe(wav_path, model_size: str = MODEL_SIZE, device: str = "cpu", comp
             on_text(s.text.strip(), float(s.end), float(info.duration))
     return {"model": model_size, "language": info.language, "duration": round(info.duration, 3),
             "initial_prompt": initial_prompt, "segments": out_segs, "words": out_words}
+
+
+def transcribe_isolated(wav_path, model_size: str = MODEL_SIZE, on_text=None) -> dict:
+    """`transcribe` in a fresh process. In a process that has already prepared footage, Whisper read the same audio bytes
+    differently and lost real speech (305 words instead of 324 on one clip, cause inside the process not found). A fresh
+    process gives the same text every time. Falls back to this process if the worker cannot run."""
+    backend = Path(__file__).resolve().parents[2]
+    env = {**os.environ, "PYTHONPATH": str(backend), "PYTHONIOENCODING": "utf-8"}
+    try:
+        p = subprocess.Popen([sys.executable, "-m", "app.pipeline.transcribe", str(wav_path), model_size], cwd=backend, env=env,
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace")
+        result = None
+        for line in p.stdout:
+            if line.startswith("HEARD "):
+                if on_text is not None:
+                    on_text(*json.loads(line[6:]))
+            elif line.startswith("RESULT "):
+                result = json.loads(line[7:])
+        if p.wait() == 0 and result is not None:
+            return result
+        log.warning("whisper worker exited with %s; transcribing in this process", p.returncode)
+    except OSError:
+        log.warning("whisper worker could not start; transcribing in this process", exc_info=True)
+    return transcribe(wav_path, model_size=model_size, on_text=on_text)
 
 
 MIN_WORD_DUR = 0.02
@@ -124,3 +152,13 @@ def drop_hallucinations(words: list[Word], energy) -> list[Word]:
     for i, w in enumerate(keep):
         w.id = w.idx = i
     return keep
+
+
+if __name__ == "__main__":  # the worker of transcribe_isolated
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+    def _heard(*args) -> None:
+        print("HEARD " + json.dumps(args), flush=True)
+
+    print("RESULT " + json.dumps(transcribe(sys.argv[1], model_size=sys.argv[2], on_text=_heard)), flush=True)

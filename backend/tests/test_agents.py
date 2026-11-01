@@ -10,9 +10,9 @@ import pytest
 from app.edl.build import Decisions, build_edl
 from app.edl.remap import Remap
 from app.pipeline import crew
-from app.rl.rhythm import ARMS, Episode, RhythmAgent, Step, episodes_from_log, phi
-from app.schemas import AudioSpec, Clip, EDL, MusicSpec, SfxCue, Unit
 from app.render.graph import SourceInfo, build_filter_complex
+from app.rl.rhythm import ARMS, Episode, RhythmAgent, Step, episodes_from_log, phi
+from app.schemas import EDL, AudioSpec, Clip, MusicSpec, SfxCue, Unit
 from sim.synth import make_video
 
 
@@ -55,8 +55,8 @@ def test_rating_is_carried_back_as_a_delayed_reward():
 
 
 def test_episodes_from_log_reads_feedback_and_rating():
-    row = lambda i, v, a: SimpleNamespace(id=i, video_id=v, proposed_action=a, context_raw_json=_ctx())  # noqa: E731
-    ev = lambda k, sid, p=None, v=1: SimpleNamespace(kind=k, suggestion_id=sid, payload_json=p or {}, video_id=v)  # noqa: E731
+    row = lambda i, v, a: SimpleNamespace(id=i, video_id=v, proposed_action=a, context_raw_json=_ctx())
+    ev = lambda k, sid, p=None, v=1: SimpleNamespace(kind=k, suggestion_id=sid, payload_json=p or {}, video_id=v)
     eps = episodes_from_log([row(1, 1, "NONE"), row(2, 1, "Z115"), row(3, 1, "NONE")],
                             [ev("accept", 1), ev("override", 2, {"final_action": "SFX"}), ev("rating", None, {"value": -1})])
     s = eps[0].steps

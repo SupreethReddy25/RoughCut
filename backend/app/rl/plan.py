@@ -37,9 +37,9 @@ from dataclasses import dataclass
 import numpy as np
 
 from app.edl.build import PAD, PAUSE_TARGET
-from app.policy import context
 from app.pipeline.crew import THRESHOLD as CREW_THRESHOLD
 from app.pipeline.segment import is_sentence_end
+from app.policy import context
 from app.schemas import UnitsFile
 
 GRID = 0.1  # s per output-time bucket
@@ -88,8 +88,7 @@ def build_stages(uf: UnitsFile, video_type: str, policy) -> list[Stage]:
             n_sp += 1
         elif u.kind == "pause":
             pause_before[n_sp] = u
-    t0 = speech[0].start if speech else 0.0
-    of = lambda dt, u: hist.get((dt, u.id), {"hist_output_ratio": 1.0})  # noqa: E731  (e.g. after a cut, no history)
+    of = lambda dt, u: hist.get((dt, u.id), {"hist_output_ratio": 1.0})
     out: list[Stage] = []
     for k, su in enumerate(speech):
         p = pause_before.get(k)
@@ -221,7 +220,7 @@ class EpisodePlanner:
         goal = target
         self.mean_plan = Plan(self.stages, mean_theta(policy), goal, offsets, beta)
         for _ in range(CALIBRATION_STEPS if target else 0):
-            acts, model_out = self.mean_plan.rollout()
+            acts, _ = self.mean_plan.rollout()
             real = _edl_seconds(uf, acts, fillers)
             if real <= 0 or abs(real - target) / target <= TOL / 2:
                 break

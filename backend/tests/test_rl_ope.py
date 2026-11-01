@@ -32,7 +32,7 @@ def _bandit_log(n: int, seed: int = 0) -> list[Logged]:
 
 def test_ips_snips_dr_recover_the_value_of_another_policy():
     data = _bandit_log(6000)
-    target = lambda dt, ctx, arms: {a: float(a == ("REMOVE" if ctx["gap_seconds"] > 1.0 else "KEEP")) for a in arms}  # noqa: E731
+    target = lambda dt, ctx, arms: {a: float(a == ("REMOVE" if ctx["gap_seconds"] > 1.0 else "KEEP")) for a in arms}
     r = evaluate(data, target, n_boot=50)
     assert abs(r.truth - 0.9) < 1e-9
     for e in ("IPS", "SNIPS", "DR", "SNDR"):
@@ -137,7 +137,7 @@ def test_planner_never_leaves_half_a_sentence(video, policy):
 def test_a_target_is_a_limit_and_a_short_edit_is_not_padded(video, policy):
     natural = suggest(video.uf, video.word_feats, policy, video_type=video.video_type, greedy=True)
     long_target = suggest(video.uf, video.word_feats, policy, video_type=video.video_type, greedy=True, target=600.0)
-    n_keep = lambda r: sum(a == "KEEP" for u, a in r.decisions.actions.items())  # noqa: E731
+    n_keep = lambda r: sum(a == "KEEP" for u, a in r.decisions.actions.items())
     assert n_keep(long_target) <= n_keep(natural) + 3  # room to spare does not turn into kept dead air
 
 

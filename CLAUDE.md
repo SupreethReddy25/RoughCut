@@ -26,6 +26,8 @@ backend\.venv\Scripts\python.exe backend\scripts\make_frontend_fixtures.py
 backend\.venv\Scripts\python.exe -m app.pipeline.run data\raw\clip_01_main.mp4 --type vlog
 backend\.venv\Scripts\python.exe -m app.edl.run clip_01_main
 backend\.venv\Scripts\python.exe -m app.render.run data\processed\clip_01_main\edl.json --out reports\demo.mp4
+# regenerate all paper data and figures
+powershell -ExecutionPolicy Bypass -File paper\scripts\run_all.ps1
 # simulator experiments -> reports/figures/ (E1: learning curves, E2: style prior + decisions to identify the style, E3: cross-persona, E4: drift, E5: target length, bandit vs MDP planner, E8: review budget, E9: off-policy evaluation, E10: creators outside the model family, E11: rhythm, RLSVI vs bandit)
 cd backend; .\.venv\Scripts\python.exe -m sim.experiments.e1; .\.venv\Scripts\python.exe -m sim.experiments.e3; .\.venv\Scripts\python.exe -m sim.experiments.e4
 cd backend; .\.venv\Scripts\python.exe -m sim.experiments.e5; .\.venv\Scripts\python.exe -m sim.experiments.e9
@@ -51,7 +53,7 @@ backend\.venv\Scripts\python.exe scripts\make_test_clips.py [--only clip_04_mess
 - `sim/review.py` + `sim/experiments/e8.py`: budgeted review sessions (uncertainty queue vs random vs timeline).
 
 ## Analysis quality (English)
-- Transcription: faster-whisper `small.en` (`ROUGHCUT_WHISPER_MODEL` in .env), beam 10, no conditioning on previous text, words with no voice under them dropped AFTER alignment (`transcribe.drop_hallucinations`; Whisper's own timing can be seconds off). English only: other languages give a made-up transcript.
+- Transcription: faster-whisper `small.en` (`ROUGHCUT_WHISPER_MODEL` in .env), beam 10, no conditioning on previous text, words with no voice under them dropped AFTER alignment (`transcribe.drop_hallucinations`; Whisper's own timing can be seconds off). English only: other languages give a made-up transcript. Runs in a fresh process (`transcribe.transcribe_isolated`): after ingest in the same process Whisper read identical audio differently and lost real speech.
 - Word timing: wav2vec2 CTC forced alignment (`app/pipeline/align.py`, `facebook/wav2vec2-base-960h`, `ROUGHCUT_ALIGN=0` to skip). Whisper's own timestamps hide pauses inside stretched words.
 - Retakes (`features.py`): `false_start_matches` (function-word restarts matched against the speech that follows, across phrase boundaries), `retake_scores` (content-token retakes), `select_takes` (best take: a clean complete earlier delivery beats a worse repeat). `is_earlier_take` = "a better take of this line exists". `segment._split_restarts` splits restarts inside a phrase.
 - Disfluency recovery (`align.recover_disfluencies`): wav2vec2's greedy reading restores stutters and hesitations Whisper tidied away. No-gap fillers are cut only where the audio dips at both edges (`fillers.snap_to_valleys`, `is_valley`).

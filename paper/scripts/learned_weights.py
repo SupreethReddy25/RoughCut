@@ -10,7 +10,6 @@ import json
 from pathlib import Path
 
 import numpy as np
-
 from app.policy import context
 from sim.experiments.common import make_learner, videos_for
 from sim.personas import make_persona

@@ -13,3 +13,7 @@ frontend/dist/
 reports/*.mp4
 reports/*.srt
 RAW Footage/
+paper/data/*.out
+paper/data/*.err
+reports/archive/*.mp4
+reports/archive/*.srt

@@ -14,13 +14,26 @@ from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import numpy as np
-
-from app.appctx import PRODUCT_EPS_BY_TYPE, PRODUCT_LAMBDA, PRODUCT_LAMBDA_BY_TYPE, STYLE_PRIOR_SIGMA, STYLE_SIGMA
+from app.appctx import (
+    PRODUCT_EPS,
+    PRODUCT_EPS_BY_TYPE,
+    PRODUCT_LAMBDA,
+    PRODUCT_LAMBDA_BY_TYPE,
+    PRODUCT_V,
+    STYLE_PRIOR_SIGMA,
+    STYLE_SIGMA,
+)
 from app.policy.linear import LinTS
 from app.policy.log_replay import Learner
 from app.policy.reward import RewardConfig
 from app.policy.style import StyleMixture
-from sim.experiments.common import generic_prior, make_learner, prototype, style_mixture, videos_for
+from sim.experiments.common import (
+    generic_prior,
+    make_learner,
+    prototype,
+    style_mixture,
+    videos_for,
+)
 from sim.personas import BASE_PERSONAS, make_persona
 from sim.session import DECISION_TYPES, run_user
 from sim.synth import make_video
@@ -60,7 +73,7 @@ def build_learner(t: dict) -> Learner:
         names = [n for n in BASE_PERSONAS if n != name]
         mix = StyleMixture({n: prototype(n) for n in names}, generic_prior(excl), sigma=STYLE_SIGMA,
                            prior_sigma=STYLE_PRIOR_SIGMA)
-        return Learner(LinTS(mix.mean_prior(), lam=PRODUCT_LAMBDA, seed=seed, gamma=gamma,
+        return Learner(LinTS(mix.mean_prior(), lam=PRODUCT_LAMBDA, v=PRODUCT_V, eps_floor=PRODUCT_EPS, seed=seed, gamma=gamma,
                              lam_by_type=PRODUCT_LAMBDA_BY_TYPE, eps_by_type=PRODUCT_EPS_BY_TYPE), mix, cfg)
     if t["algo"] == "stripped":
         mix = style_mixture(excl)

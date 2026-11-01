@@ -18,8 +18,8 @@ from sqlmodel import Session
 
 from app.api.io import ChangeOut
 from app.models import SuggestionRow
-from app.session import PLANNER_TAG
 from app.policy.log_replay import Learner
+from app.session import PLANNER_TAG
 from app.svc.bundle import Bundle
 
 MARGIN = 0.5  # a replacement must be better than the current action by this much (posterior-mean reward units)
