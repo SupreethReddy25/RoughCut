@@ -12,7 +12,7 @@ This document is the source of truth for building RoughCut. It is written so eac
 
 **Core purpose:** a talking-head creator should be able to go from raw clip to a **post-ready Reel without opening CapCut or any other simple editor**. Over time it should take *less* effort than a simple editor, because RoughCut learns how that creator edits.
 
-- **Input:** one or more raw talking-head clips (30 s to 3 min total) with speech: vlogs, tutorials, opinions, "talking to camera" content.
+- **Input:** one or more raw talking-head clips (30 s to 5 min total) with speech: vlogs, tutorials, opinions, "talking to camera" content.
 - **Post-ready output:**
   - jump-cut edit with silences, retakes and filler words removed
   - face-centered 9:16 reframe
@@ -135,7 +135,7 @@ Section 9, E11/E12, measures exactly this.
 ## 4. Scope
 
 ### In scope
-- Projects: create, upload 1 to 5 clips (mp4/mov, ≤ 3 min total, ≤ 500 MB total), tag the video type (`tutorial | vlog | opinion | other`), set a target duration (optional).
+- Projects: create, upload 1 to 5 clips (mp4/mov, ≤ 5 min total, ≤ 500 MB total), tag the video type (`tutorial | vlog | opinion | other`), set a target duration (optional).
 - Automatic analysis: transcript with word timings, pauses, fillers, retakes, loudness, face track, semantic redundancy/off-topic scores.
 - Learned decisions D1–D5 (D6 hook = Could).
 - Editor:
@@ -672,7 +672,7 @@ Each phase ends with **acceptance criteria**. Don't start the next phase until t
 ### Phase 8: Deployment + studies (Weeks 8–10)
 - Single Docker image (frontend built and served by FastAPI; ffmpeg; Whisper + MiniLM + fonts + music pre-bundled).
 - Host on HF Spaces (Docker, free CPU) / Render / a college server. Export logs daily (ephemeral storage).
-- Limits: ≤ 3 min total, ≤ 500 MB, one processing job at a time.
+- Limits: ≤ 5 min total, ≤ 500 MB, one processing job at a time.
 - Run **E6, E11, E12**, then E7 and E9 on the real logs.
 - **Accept:** a public URL works; E11 data collected (timings, ratings, SUS); logs exported.
 
@@ -841,7 +841,7 @@ Contracts (`schemas.py`: units, words, EDL v3, suggestion, event) are **frozen i
 
 | Risk | Mitigation |
 |---|---|
-| Whisper slow on CPU hosting | `base.en` int8; ≤ 3 min; caching; progress UI. |
+| Whisper slow on CPU hosting | `base.en` int8; ≤ 5 min; caching; progress UI. |
 | Whisper drops fillers / timestamps drift | Disfluency prompt; `nonword_voiced_ratio`; 40 ms padding; skip fillers with no clean gap. |
 | Filler-word cuts sound choppy | Only suggest REMOVE when gaps ≥ 30 ms on both sides; 8 ms fades; preview to check; the conservative prior removes only um/uh at first. |
 | Caption preview ≠ export | Same JSON, same fonts, px at 1080 scale; a parity test renders a frame via ffmpeg and checks line breaks against the preview's line computation (both from `edl/build.py`, not the browser). |

@@ -37,7 +37,7 @@ PRIORS = ("none", "generic", "mixture")
 PRIOR_LABEL = {"none": "no prior", "generic": "pooled generic prior", "mixture": "style-mixture prior"}
 PRIOR_COLOR = {"none": "#999999", "generic": "#0072B2", "mixture": "#D55E00"}
 EARLY = 3  # "acceptance on videos 1-3"
-PRODUCT = {"lam": 10.0, "prior_sigma": 3.0}
+PRODUCT = {"lam": 10.0, "lam_by_type": {"phrase": 30.0}, "prior_sigma": 3.0}  # = app/appctx.py
 MODELS = {"plain": {}, "product": PRODUCT}  # the PLAN model vs the settings the app runs
 
 

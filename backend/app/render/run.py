@@ -47,7 +47,7 @@ def render(edl: EDL, source: str | Path, out_mp4: str | Path, out_srt: str | Pat
     if edl.audio.music is not None:
         if music_path is None or not Path(music_path).exists():
             raise ValueError(f"the music track {edl.audio.music.track_id!r} is not available")
-        mix = MusicMix(edl.audio.music.gain_db, edl.audio.music.duck_db, edl.duration)
+        mix = MusicMix(edl.audio.music.gain_db, edl.audio.music.duck_db, edl.duration, edl.audio.music.start_s)
         inputs += ["-stream_loop", "-1", "-i", str(music_path)]  # looped; the graph trims it to the output length
     t0 = time.time()
     with tempfile.TemporaryDirectory(prefix="roughcut_render_") as td:

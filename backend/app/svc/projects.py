@@ -27,14 +27,19 @@ from app.models import (
     vid_str,
 )
 from app.pipeline.ingest import probe
+from app.pipeline.transcribe import LANGUAGE_WARN_PROB
 from app.policy.explain import explain
 from app.policy.preferences import describe_preferences
 from app.policy.reward import DEFAULT, LEARNED_KINDS, updates_for
 from app.policy.style import STYLES
 from app.render.run import render as render_edl
+from app.rl.hook import bandit_from_log
+from app.rl.rhythm import RhythmAgent, episodes_from_log
+from app.rl.rhythm import explain as explain_rhythm
 from app.schemas import OutputSpec
 from app.session import suggest as run_suggest
 from app.state import sanitize_defaults
+from app.svc import progress as progress_lib
 from app.svc.bundle import ApiError, Bundle, event_dict, load_bundle, queue_out, state_out, style_out
 from app.svc.events import arms_of, require_ready
 from app.svc.stats import aggregate, video_stats
@@ -134,6 +139,13 @@ def create_project(ctx: AppContext, session: Session, user_id: int, inputs: list
         raise ApiError(422, f"type must be one of {VIDEO_TYPES}")
     if target is not None and not 5 <= target <= 180:
         raise ApiError(422, "target duration must be between 5 and 180 seconds")
+    try:
+        total = sum(probe(p).duration for p in inputs)
+    except Exception:  # unreadable here: the analysis job reports it properly
+        total = 0.0
+    if total > config.MAX_TOTAL_SECONDS:
+        raise ApiError(422, f"This video is {int(total) // 60}:{int(total) % 60:02d} long. RoughCut handles up to "
+                            f"{config.MAX_TOTAL_SECONDS // 60} minutes in total: trim it and upload again.")
     v = Video(user_id=user_id, title=(title.strip() or names[0]), sources_json=[str(p) for p in inputs],
               video_type=video_type, target_duration=target, status="uploaded", autopilot=autopilot,
               settings_json={"defaults": sanitize_defaults(user.defaults_json)})  # the user's remembered settings
@@ -160,7 +172,7 @@ def create_project(ctx: AppContext, session: Session, user_id: int, inputs: list
     job = ctx.jobs.submit(lambda: _ingest(ctx, pk, moved, video_type), kind="ingest", meta={"project": pk})
     with ctx.session() as s2:
         v2 = s2.get(Video, pk)
-        v2.settings_json = {**v2.settings_json, "ingest_job": job.id}
+        v2.settings_json = {**v2.settings_json, "ingest_job": job.id, "expected_seconds": total}
         s2.add(v2)
         s2.commit()
     session.refresh(v)
@@ -186,6 +198,7 @@ def _ingest(ctx: AppContext, pk: int, inputs: list[Path], video_type: str) -> No
         if not any(u.kind == "speech" for u in uf.units):
             raise RuntimeError("no speech was detected in the video: there is nothing to edit")
         _thumbnail(out)
+        progress_lib.learn(ctx, pk, uf.duration)
         src_dims = _source_dims(out)
         with ctx.session() as s:
             for model in (UnitRow, WordRow):  # a re-run (restart recovery) starts from a clean slate
@@ -296,7 +309,9 @@ def get_project(ctx: AppContext, session: Session, pk: int) -> ProjectOut:
     return ProjectOut(**data, source_map=list(b.video.source_map_json), units=list(uf.units) if uf else [],
                       words=list(uf.words) if uf else [], seen_unit_ids=sorted(b.seen_units),
                       exports=dict(b.video.settings_json.get("exports", {})), job=job.public() if job else None,
-                      source=dict(b.video.settings_json.get("source", {"width": 1920, "height": 1080})))
+                      source=dict(b.video.settings_json.get("source", {"width": 1920, "height": 1080})),
+                      progress=progress_lib.snapshot(ctx, b.video) if b.video.status in ("uploaded", "processing") else None,
+                      rating=next((int(e.payload_json["value"]) for e in reversed(b.live) if e.kind == "rating"), None))
 
 
 # --------------------------------------------------------------------------- suggest
@@ -310,16 +325,46 @@ def suggest(ctx: AppContext, session: Session, pk: int):
             if b.sug_rows:  # idempotent: the suggestions of a video are made once
                 return state_out(b, learner, message="Suggestions already exist.")
             auto = b.video.autopilot
+            rhythm, hook = _agents(session, uid, pk, auto) if ctx.agents else (None, None)
             res = run_suggest(b.analysis.uf, b.analysis.word_feats, learner.policy, video_type=b.video.video_type,
-                              source="autopilot" if auto else "policy", greedy=auto)
+                              source="autopilot" if auto else "policy", greedy=auto,
+                              target=b.video.target_duration, seed=pk, rhythm=rhythm, hook=hook)
             rows = [row_from_suggestion(s, pk, mean_best=mb) for s, mb in zip(res.suggestions, res.mean_best, strict=True)]
             session.add_all(rows)
             session.flush()
             ctx.policies.commit(session, uid, learner)
             session.commit()
             return state_out(load_bundle(ctx, session, pk), learner,
-                             message=f"{len(rows)} suggestions made; {len(res.skipped_fillers)} fillers left alone "
-                                     "(no clean gap to cut in).")
+                             message=language_warning(ctx, pk) or f"{len(rows)} suggestions made; "
+                             f"{len(res.skipped_fillers)} fillers left alone (no clean gap to cut in).")
+
+
+def _agents(session: Session, uid: int, pk: int, greedy: bool):
+    """The creator's rhythm and hook agents, rebuilt from everything they have logged."""
+    vids = session.exec(select(Video.id).where(Video.user_id == uid)).all()
+    rows = session.exec(select(SuggestionRow).where(SuggestionRow.video_id.in_(vids),  # type: ignore[attr-defined]
+                                                    SuggestionRow.superseded == False,
+                                                    SuggestionRow.decision_type.in_(("rhythm", "hook")))  # type: ignore[attr-defined]
+                        .order_by(SuggestionRow.id)).all()
+    events = session.exec(select(EventRow).where(EventRow.video_id.in_(vids), EventRow.undone == False)  # type: ignore[attr-defined]
+                          .order_by(EventRow.id)).all()
+    rhythm = RhythmAgent(seed=pk, greedy=greedy)
+    for ep in episodes_from_log([r for r in rows if r.decision_type == "rhythm"], events):
+        rhythm.add_episode(ep)
+    return rhythm, bandit_from_log([r for r in rows if r.decision_type == "hook"], events, seed=pk, greedy=greedy)
+
+
+def language_warning(ctx: AppContext, pk: int) -> str | None:
+    """Analysis is English-only: say so when the speech is clearly something else, rather than show a made-up edit."""
+    try:
+        tr = json.loads((ctx.video_dir(pk) / "transcript.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    lang, prob = tr.get("detected_language"), tr.get("detected_language_prob", 0.0)
+    if lang and lang != "en" and prob >= LANGUAGE_WARN_PROB:
+        return (f"This video sounds like it is not in English ({lang}, {prob:.0%} sure). RoughCut's analysis is English "
+                "only, so the transcript and the cuts below are unreliable.")
+    return None
 
 
 def recover_interrupted(ctx: AppContext) -> int:
@@ -340,12 +385,27 @@ def recover_interrupted(ctx: AppContext) -> int:
     return n
 
 
+NOT_EXPLAINABLE = {
+    "rhythm": "",
+    "hook": "Picked from this video's strongest lines, by what you have preferred as an opener so far.",
+    "pace": "Picked from how fast this phrase is spoken and the pace you have kept on phrases like it.",
+    "music_timing": "Picked from the kind of video and how long its first sentence is.",
+}
+
+
 def explain_suggestion(ctx: AppContext, session: Session, pk: int, sid: int) -> dict:
     b = load_bundle(ctx, session, pk)
     s = b.sug_by_id.get(sid)
     if s is None:
         raise ApiError(404, f"suggestion {sid} not found in this project")
     with ctx.locks(("user", b.video.user_id)):
+        if s.decision_type in NOT_EXPLAINABLE:
+            text = (explain_rhythm(s.context_raw_json, b.action_of(s)) if s.decision_type == "rhythm"
+                    else NOT_EXPLAINABLE[s.decision_type])
+            return {"suggestion_id": sid, "text": text, "confidence": s.confidence, "reasons": []}
+        if s.decision_type == "phrase" and s.context_raw_json.get("crew_score", 0.0) >= 0.5:
+            return {"suggestion_id": sid, "text": "This sounds like talk to the crew rather than to your viewer, so it was "
+                    "cut. Restore it if it belongs in the video.", "confidence": s.confidence, "reasons": []}
         learner = ctx.policies.get(session, b.video.user_id)
         ex = explain(learner.policy, s.decision_type, s.context_raw_json, s.proposed_action, s.confidence)
     return {"suggestion_id": sid, "text": ex.text, "confidence": s.confidence,
@@ -470,7 +530,7 @@ def start_render(ctx: AppContext, session: Session, pk: int, preset: str) -> dic
             if music_path is None:
                 raise ApiError(409, f"the music track {edl.audio.music.track_id!r} is not available any more: "
                                     "choose another track or remove the music")
-        last_event = max((e.id for e in b.live), default=0)
+        last_event = max((e.id for e in b.live if e.kind != "rating"), default=0)
         sync_text_overlays(session, b)
         warn = edl.duration > pr["max_duration_s"]
         source = ctx.video_dir(pk) / "source.mp4"
@@ -502,8 +562,8 @@ def start_render(ctx: AppContext, session: Session, pk: int, preset: str) -> dic
 
 def latest_live_event(session: Session, pk: int) -> int:
     """Id of the newest non-undone event of a project (0 if none): identifies the edit a render was made from."""
-    return max(session.exec(select(EventRow.id).where(EventRow.video_id == pk,
-                                                      EventRow.undone == False)).all(), default=0)
+    return max(session.exec(select(EventRow.id).where(EventRow.video_id == pk, EventRow.undone == False,
+                                                      EventRow.kind != "rating")).all(), default=0)
 
 
 def download_path(ctx: AppContext, session: Session, pk: int, fmt: str, preset: str | None) -> tuple[Path, str, dict]:

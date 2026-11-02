@@ -17,7 +17,7 @@ from app.edl.build import PAD, PAUSE_TARGET
 from app.policy.log_replay import Learner
 from app.policy.reward import ManualEdit, classify_manual_edit
 from app.schemas import Event, Suggestion
-from app.session import EditSession, Item, make_suggestion
+from app.session import EditSession, Item, make_planner, make_suggestion, planned_choice
 from sim.personas import Persona
 from sim.synth import SynthVideo
 
@@ -55,6 +55,9 @@ class UserRun:
     videos: list[VideoResult]
     suggestions: list[Suggestion] = field(default_factory=list)
     events: list[Event] = field(default_factory=list)
+    # simulator ground truth per logged suggestion (for off-policy evaluation, E9): the persona's ideal action
+    # and its feedback parameters at that moment
+    truth: list[dict] = field(default_factory=list)
 
 
 def _manual_edit(item: Item, final: str, rng: np.random.Generator) -> ManualEdit:
@@ -78,8 +81,9 @@ def _manual_edit(item: Item, final: str, rng: np.random.Generator) -> ManualEdit
 
 
 def run_user(persona: Persona, learner: Learner, videos: list[SynthVideo], seed: int, keep_log: bool = False,
-             p_manual: float = P_MANUAL) -> UserRun:
-    """One simulated creator editing `videos` in order with `learner.policy` suggesting. Learns online."""
+             p_manual: float = P_MANUAL, plan: bool = False) -> UserRun:
+    """One simulated creator editing `videos` in order with `learner.policy` suggesting. Learns online.
+    `plan`: when the persona has a target duration, phrase/pause suggestions come from the episode planner."""
     rng = np.random.default_rng(seed + 12345)
     policy = learner.policy
     run = UserRun(persona.name, policy.name, seed, [])
@@ -87,11 +91,14 @@ def run_user(persona: Persona, learner: Learner, videos: list[SynthVideo], seed:
         p = persona.for_video(vi, video.video_type)
         p.prepare(video)
         sess = EditSession(video.uf, video.word_feats, video.video_type)
+        planner = make_planner(video.uf, video.video_type, policy, p.target_duration,
+                               seed=seed * 1000 + vi) if plan else None
         res = VideoResult(vi, video.video_type, video.minutes)
         implicit: list[tuple[Item, str, int | None]] = []
         for item in sess.items():
             dt, ctx = item.decision_type, item.ctx
-            choice = policy.choose(dt, ctx)
+            planned = planned_choice(planner, item, sess)
+            choice = planned[0] if planned is not None else policy.choose(dt, ctx)
             ideal = p.ideal_action(item)
             res.n[dt] += 1
             res.correct[dt] += choice.action == ideal
@@ -101,6 +108,8 @@ def run_user(persona: Persona, learner: Learner, videos: list[SynthVideo], seed:
                 sug = make_suggestion(item, choice, policy, video.uf.video_id)
                 sug.id = sid
                 run.suggestions.append(sug)
+                run.truth.append({"ideal": ideal, "noise": p.noise, "p_override": p.p_override,
+                                  "review": p.review_budget, "video": vi})
             final = choice.action
             if rng.random() < p.review_budget:  # reviewed => seen
                 feedback = ideal

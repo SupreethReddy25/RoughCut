@@ -15,7 +15,8 @@ from app.schemas import AudioSpec, MusicSpec, OutputSpec, TextOverlay, UnitsFile
 
 SPEEDS = (1.0, 1.1, 1.15, 1.25)
 CAPTION_POSITIONS = ("lower_third", "center", "top")
-NEUTRAL = {"pause": "KEEP", "zoom": "NONE", "emphasis": "NONE"}  # what "reject without an alternative" leaves
+NEUTRAL = {"pause": "KEEP", "zoom": "NONE", "emphasis": "NONE", "rhythm": "NONE", "pace": "S100", "hook": "NONE",
+           "music_timing": "FROM_START"}  # what "reject without an alternative" leaves
 GAIN_RANGE = (-40.0, -6.0)  # background music level under the voice, dB
 DUCK_RANGE = (-24.0, 0.0)  # how far the music dips while the voice speaks, dB (0 = no ducking)
 HOOK_ID = "hook"  # the suggested title (PLAN 8.7); a normal overlay once it is in the state
@@ -107,22 +108,34 @@ def sanitize_defaults(d: dict | None) -> dict:
 
 
 def hook_overlay(uf: UnitsFile) -> TextOverlay | None:
-    """The suggested title (PLAN 8.7): the first sentence of the talk, at most 8 words, shown for the first 3 s."""
-    first = next((u for u in uf.units if u.kind == "speech"), None)
-    if first is None:
-        return None
-    start = min((w.idx for w in uf.words if w.unit_id == first.id), default=None)
-    if start is None:
-        return None
+    """The suggested title (PLAN 8.7): the first sentence of the talk, at most 8 words, shown for the first 3 s.
+    Fillers ("So,") and abandoned takes are left out, so the title reads like what remains after the edit."""
+    skip = {u.id for u in uf.units if u.kind == "speech" and u.features.get("is_earlier_take", 0.0) >= 0.5}
     words: list[str] = []
-    for w in sorted((w for w in uf.words if w.idx >= start), key=lambda w: w.idx):  # across phrases: a sentence
+    for w in sorted(uf.words, key=lambda w: w.idx):  # across phrases: a sentence
+        if w.is_filler or w.unit_id in skip:
+            continue
         words.append(w.text_display.strip())
         if len(words) >= HOOK_MAX_WORDS or words[-1].endswith((".", "?", "!", "…")):
             break
     text = " ".join(x for x in words if x).rstrip(",;:.!?…- ").strip()
     if not text:
         return None
+    text = text[0].upper() + text[1:]
     return TextOverlay(id=HOOK_ID, text=text, t0=0.0, t1=HOOK_SECONDS, position="top", style_id="title")
+
+
+def chosen_hook_overlay(uf: UnitsFile, action: str | None) -> TextOverlay | None:
+    """The title for the hook decision's action (None: no title)."""
+    from app.rl.hook import candidates
+
+    if not action or action == "NONE":
+        return None
+    cands = candidates(uf)
+    k = int(action.split("_")[1])
+    if k >= len(cands) or not cands[k]["text"]:
+        return None
+    return TextOverlay(id=HOOK_ID, text=cands[k]["text"], t0=0.0, t1=HOOK_SECONDS, position="top", style_id="title")
 
 
 def validate_speed(value) -> float:
@@ -141,6 +154,14 @@ def base_decisions(active: list) -> Decisions:
     for s in active:
         if s.decision_type == "zoom":
             dec.zoom[s.target_id] = s.proposed_action
+        elif s.decision_type == "rhythm":
+            dec.rhythm[s.target_id] = s.proposed_action
+        elif s.decision_type == "pace":
+            dec.pace[s.target_id] = s.proposed_action
+        elif s.decision_type == "hook":
+            dec.hook = s.proposed_action
+        elif s.decision_type == "music_timing":
+            dec.music_timing = s.proposed_action
         elif s.decision_type == "emphasis":
             if s.proposed_action != "NONE":
                 dec.emphasis.add(int(s.context_raw_json[f"c{s.proposed_action.split('_')[1]}_word_id"]))
@@ -153,7 +174,14 @@ def apply_event(st: EditState, kind: str, payload: dict, uf: UnitsFile) -> None:
     """Apply one (non-undone) event to the state."""
     if kind in ("override", "reject", "fine_cut"):
         if "mapping" in payload:
-            apply_mapping(st.decisions, mapping_from_payload(payload["mapping"]), uf)
+            m = mapping_from_payload(payload["mapping"])
+            apply_mapping(st.decisions, m, uf)
+            if m.decision_type == "hook":
+                ov = chosen_hook_overlay(uf, m.final_action)
+                if ov is None:
+                    st.texts.pop(HOOK_ID, None)
+                else:
+                    st.texts[HOOK_ID] = ov
     elif kind == "speed":
         st.speed = float(payload["value"])
     elif kind == "setting":
@@ -187,7 +215,7 @@ def rebuild(uf: UnitsFile, active_suggestions: list, events: list, defaults: dic
             setattr(st, key, d[key])
     if d.get("music"):
         st.music = MusicSpec(**d["music"])
-    hook = hook_overlay(uf)
+    hook = chosen_hook_overlay(uf, st.decisions.hook) if st.decisions.hook else hook_overlay(uf)
     if hook is not None:
         st.texts[hook.id] = hook
     for ev in events:
@@ -199,6 +227,14 @@ def current_action(st: EditState, decision_type: str, target_id: int, ctx: dict)
     """The action that is in the edit right now for a suggestion's target."""
     if decision_type == "zoom":
         return st.decisions.zoom.get(target_id, "NONE")
+    if decision_type == "rhythm":
+        return st.decisions.rhythm.get(target_id, "NONE")
+    if decision_type == "pace":
+        return st.decisions.pace.get(target_id, "S100")
+    if decision_type == "hook":
+        return st.decisions.hook or "NONE"
+    if decision_type == "music_timing":
+        return st.decisions.music_timing or "FROM_START"
     if decision_type == "emphasis":
         for k in range(int(ctx.get("n_cand", 0))):
             if int(ctx[f"c{k}_word_id"]) in st.decisions.emphasis:

@@ -1,0 +1,868 @@
+\documentclass{ieeeaccess}
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\begin{document}
+\history{Date of publication xxxx 00, 0000, date of current version xxxx 00, 0000.}
+\doi{10.1109/ACCESS.2017.DOI}
+
+\title{Learning a Creator's Editing Style Online: A Posterior-Sampling Bandit with Style Priors and Target-Length Planning for Talking-Head Video}
+\author{\uppercase{P. Supreeth Reddy}\authorrefmark{1},
+\uppercase{B. Vijayasimha Reddy}\authorrefmark{1},
+\uppercase{M. Rushivarun Reddy}\authorrefmark{1}, and
+\uppercase{Geetha M}\authorrefmark{1}}
+\address[1]{Department of Computer Science and Engineering, Amrita School of Computing, Amrita Vishwa Vidyapeetham, Amritapuri, Kerala, India (e-mail: am.sc.u4ae23142@am.students.amrita.edu, am.sc.u4aie23110@am.students.amrita.edu,\newline am.sc.u4aie23128@am.students.amrita.edu, geetham@am.amrita.edu)}
+
+\markboth
+{Reddy \headeretal: Learning a Creator's Editing Style Online}
+{Reddy \headeretal: Learning a Creator's Editing Style Online}
+
+\corresp{Corresponding author: P. Supreeth Reddy (e-mail: am.sc.u4ae23142@am.students.amrita.edu).}
+
+\begin{abstract}
+Short talking-head videos are cut by hand, line by line, and two creators rarely want the same cut from the same footage. Fixed rules cannot capture that difference, and a supervised model needs a labeled history that a new creator does not have. We treat each suggested edit as a decision in an online reinforcement learning problem, where the creator's accepts, rejections, and ordinary transcript edits are the reward. The agent is a linear Thompson sampling bandit across five decision types. Three additions separate it from a standard bandit: a posterior over known editing styles that shortens the cold start, a review queue ordered by posterior uncertainty, and a finite-horizon planner that fits a target length by posterior sampling. Across six simulated creators and ten seeds, the method reached 90.7 percent acceptance by the tenth video against 58.7 percent for a rule baseline, with 7 percent less regret than the same bandit without the style prior. The planner cut held-out length error from 45.7 to 4.0 percent for about one point of acceptance. Exploration itself raised no held-out score, a limit we report. Two recorded clips confirmed the analysis pipeline, but no human study has been run yet.
+\end{abstract}
+
+\begin{keywords}
+Contextual bandits, human-in-the-loop learning, off-policy evaluation, personalization, posterior sampling, reinforcement learning, Thompson sampling, video editing
+\end{keywords}
+
+\titlepgskip=-15pt
+
+\maketitle
+
+\PARstart{R}{einforcement} learning (RL) studies agents that improve by acting and observing the consequences of what they did \cite{sutton2018}. Unlike supervised learning, the agent gets no list of right answers. It sees a reward for the action it took and has to decide when to try something else in order to learn more. That framing has moved well beyond games \cite{mnih2015}: recommender systems \cite{li2010,zheng2018,chen2019}, photo retouching \cite{hu2018exposure}, and the alignment of large language models with human preference \cite{christiano2017,ouyang2022} all now use it. In the last two cases the reward comes from people, which makes every sample expensive. Sample efficiency stops being a detail and becomes the main design constraint.
+
+Video editing sits squarely in that expensive-feedback corner. A creator who films a talking-head Reel or Short usually records it in one sitting, restarts sentences, pauses to think, and says ``um'' and ``you know''. Getting from that footage to something postable means removing dead air, choosing between repeated takes, deciding which fillers matter, adding punch-in zooms, and highlighting a caption word now and then. Each choice is small, but a two-minute clip contains over a hundred of them. They also depend on taste. A storyteller keeps the pause that lands a joke, whereas a creator who wants a fast pace removes it. So there is no single correct edit against which a universal model could be trained.
+
+Treating this as RL raises several specific difficulties. Feedback is partial, because a rejected pause suggestion says only that this option was wrong, not which of the other three was right. A creator will only edit a handful of videos before forming an opinion of the tool, so the agent has to be useful from the first video. Tastes change over time. Editing errors also differ in cost, since a badly placed cut deletes a sentence but a misplaced zoom is merely ugly. Finally, a length limit such as ``make this 30 seconds'' applies to the edit as a whole and cannot be decided one cut at a time.
+
+The task addressed here is the following. Given a raw clip of English speech and a history of one creator's corrections, propose a value for each editing decision in the clip so that the proposals match what that creator would have chosen, ask the creator only about the ones most likely to be wrong, respect an optional target length, and update the model from whatever the creator does next.
+
+Existing tools leave a clear gap. Rule-based features such as one-click silence removal apply one threshold to everyone and never learn. Transcript-based editors \cite{berthouzoz2012,rubin2013,huber2019} make cutting far faster but leave every decision to the person. Supervised models could learn taste, yet they need labeled data from that same person before they can be of use, and they do not choose what to ask about. RL fits better because the labels arrive only as a side effect of using the tool, and an uncertainty-aware agent can improve while it works. We use the simplest formulation that captures this. Most editing decisions barely influence later contexts, so a contextual bandit \cite{li2010,chu2011} is a defensible model, and it learns from a few hundred interactions where deep RL \cite{mnih2015,schulman2017} would need many more. The sequential part of the problem, the length budget, gets a separate exact planner.
+
+Our technical objectives were to build a simulation environment that exercises the real analysis code, to design a per-creator agent and a reward function that covers both suggestions and manual edits, to outperform rule-based and generic baselines within a few videos, to keep learning stable across seeds, and to measure honestly where the method fails. This paper makes the following contributions.
+
+\begin{itemize}
+\item \textbf{A reward model in which ordinary editing is the training signal.} Word deletions, pause drags, and caption clicks are classified into overrides of learnable decisions, so a creator never performs a labeling step. In the ablation study, removing this mapping lowers early acceptance by 2.6 points.
+\item \textbf{A style posterior as a tempered bandit prior.} A Bayesian mixture over style prototypes supplies the prior mean of the bandit. Tempering lets the displayed style sharpen within about four interactions, whereas the prior moves slowly enough that one click cannot rewrite the policy. With leave-one-style-out priors, regret falls by 7 percent and the median number of decisions needed to reach 85 percent acceptance falls from 473 to 348.
+\item \textbf{Uncertainty-ordered review under a budget.} Thompson draws give each suggestion a confidence (expected calibration error 0.021), and that value sorts the review queue. At a 30 percent review budget, 86.6 percent of exported decisions are correct, against 78.3 percent for random order and 63.4 percent for timeline order.
+\item \textbf{Posterior sampling for a target-length edit with guarded reward.} We pose length fitting as a finite-horizon Markov decision process (MDP) whose reward is the learned bandit model, solve it exactly, and show that the history features must be frozen to stop the solver from exploiting model extrapolation. Length error on unseen videos falls from 45.7 to 4.0 percent.
+\item \textbf{An explicit test of whether exploration pays in this domain.} Frozen on unseen videos, policies trained with and without exploration differ by less than one point, while exploration costs up to 5.7 points during training. We report this finding together with off-policy evaluation, which shows why stochastic logging still has value.
+\end{itemize}
+
+Fig.~\ref{fig:loop} shows the interaction at the conceptual level. The creator is part of the environment, the state is the feature vector of the current decision, and the policy update happens after each piece of feedback rather than in a separate training phase.
+
+\Figure[t!](topskip=0pt, botskip=0pt, midskip=0pt)[width=0.99\columnwidth]{figures/loop.pdf}
+{Conceptual learning loop. Training and inference share one path: each proposal is applied immediately and every correction updates the model before the next suggestion is scored.\label{fig:loop}}
+
+\section{Related Work}
+\label{sec:related}
+
+\subsection{Computational and Transcript-Based Video Editing}
+A long line of work in graphics and human-computer interaction reduces editing effort by aligning video to its text. Berthouzoz \emph{et al.} \cite{berthouzoz2012} placed cuts and transitions in interview footage from a transcript and hid jump cuts with audio-visual cues. Rubin \emph{et al.} \cite{rubin2013} built content-based tools for audio stories, and Shin \emph{et al.} \cite{shin2016} linked scripts to audio during authoring. QuickCut \cite{truong2016} matched narration with footage from the editor's own annotations. Video Digests \cite{pavel2014} made lecture videos skimmable by segmenting them through their transcripts. B-Script \cite{huber2019} recommended B-roll from the transcript, and Leake \emph{et al.} \cite{leake2017} encoded film idioms as cost terms for dialogue scenes. Fried \emph{et al.} \cite{fried2019} went further and synthesized the talking head itself after a text edit. These systems achieved large time savings, but their preferences are either fixed idioms or settings that the user must supply. None of them learns from one user's corrections across projects.
+
+Recent systems add language models. LAVE \cite{wang2024lave} lets a user direct edits through an LLM agent. VideoDiff \cite{huh2025videodiff} generates alternative rough cuts for comparison. In the VideoDiff evaluation a participant asked for the system to learn personal preferences over time, which is the direct motivation for our work. Write-A-Video \cite{wang2019write} assembles montages from text. These tools depend on the user stating an intent in words, which is natural for structural edits and tedious for hundreds of small pacing decisions.
+
+\subsection{Reinforcement Learning for Editing}
+RL has been applied to adjacent tasks. Zhou \emph{et al.} \cite{zhou2018summarization} summarized video with a policy trained on diversity and representativeness rewards. Exposure \cite{hu2018exposure} learned a sequence of interpretable photo operations with deep RL and adversarial rewards. Closest to ours is Hu \emph{et al.} \cite{hu2023rlediting}, who trained an RL editor on professional demonstrations with a pretrained vision-language model. These works learn one policy from a dataset for a general notion of quality. They require offline training at scale and do not adapt to an individual. Our agent, in contrast, begins almost empty, trains on one person during normal use, and is evaluated on matching that person.
+
+\subsection{Contextual Bandits and Thompson Sampling}
+Contextual bandits became a standard tool for personalization after LinUCB was applied to news recommendation \cite{li2010} and analyzed with linear payoffs \cite{chu2011}. Thompson sampling, which dates to 1933 \cite{thompson1933}, has strong empirical and theoretical support \cite{kaufmann2012,agrawal2013,abeille2017,russo2018}. Riquelme \emph{et al.} \cite{riquelme2018} found that simple linear posteriors on good features remain hard to beat. Surveys show the range of applications \cite{bouneffouf2020}, and a full treatment is given in \cite{lattimore2020}. For non-stationary preferences, discounted estimators give guarantees \cite{russac2019}. We use these components as they are and focus on the domain-specific structure placed around them.
+
+\subsection{Priors Across Users}
+A new user's cold start is often handled by sharing information across tasks. Meta-Thompson sampling learns a prior over tasks \cite{kveton2021meta}. Cella \emph{et al.} \cite{cella2020meta} bias linear bandits toward a learned mean, and latent bandits \cite{hong2020latent} assume that each user belongs to one of a few hidden types and infer which. Our style posterior is closest to latent bandits, but its mixture supplies only a prior mean to per-creator ridge models, so the agent can move away from all the prototypes when a creator matches none of them. We test that case explicitly.
+
+\subsection{Learning from Human Feedback}
+TAMER \cite{knox2009} showed that agents can learn from human evaluative signals, and later work found that such signals depend on the agent's current policy \cite{macglashan2017}. Preference-based deep RL \cite{christiano2017} and RLHF for language models \cite{ouyang2022} learn a reward model from human comparisons. Interpreting usage as feedback has a long history in recommendation, where implicit signals are treated as weak evidence \cite{hu2008}. Our reward mapping borrows that caution: a suggestion that was seen but left alone earns half the reward of an explicit accept, and one never seen earns nothing. Choosing what to ask a person is the concern of active learning \cite{settles2012}. Our queue uses the same intuition, with bandit uncertainty as the criterion.
+
+\subsection{Planning and Model Exploitation}
+Posterior sampling for RL (PSRL) \cite{osband2013} extends Thompson sampling to whole episodes, solving an MDP sampled from the posterior. Model-based RL is known to exploit errors in a learned model, which motivated limited rollouts \cite{janner2019} and uncertainty penalties \cite{yu2020}. Constrained MDPs handle budgets formally \cite{altman1999}. Our length-target planner uses PSRL with a known transition model, and we report a concrete failure in which the solver exploited a linear reward model until it cut an entire video. Proximal policy optimization \cite{schulman2017} was our first plan, but with known deterministic transitions an exact solution is both cheaper and optimal for the given reward.
+
+\subsection{Off-Policy Evaluation}
+Offline evaluation estimates what a different policy would have achieved from logs \cite{li2011,saito2021}. Inverse propensity scoring \cite{horvitz1952}, its self-normalized form \cite{swaminathan2015}, and doubly robust estimators \cite{dudik2011} are the main tools, and slate settings have their own estimators \cite{swaminathan2017}. Adaptive logging complicates inference \cite{hadad2021}, and bootstraps with few clusters are too narrow \cite{cameron2008}. We log propensities for every suggestion so these estimators can be used, and we validate them against simulator truth before applying them to real logs.
+
+\subsection{Speech Analysis for Disfluencies}
+The analysis layer relies on modern speech models. Whisper \cite{radford2023} transcribes accurately but tends to tidy disfluent speech, which is why prompting strategies have been studied for verbatim output \cite{smith2025}. Forced alignment with a character model such as wav2vec 2.0 \cite{baevski2020} through connectionist temporal classification (CTC) \cite{graves2006} gives accurate word timing, as WhisperX \cite{bain2023} demonstrated. Disfluency detection itself has been studied with sequence models \cite{zayats2016}, joint parsing \cite{honnibal2014}, and end-to-end systems \cite{lou2020}. These treat removal as a uniform clean-up task, but creators differ on which fillers to keep.
+
+\subsection{Why a Different Approach Is Needed}
+Table~\ref{tab:qualitative} summarizes these gaps. We found no system that learns one creator's preferences online for this class of edit while also planning to a length target and logging what is needed for counterfactual evaluation. The proposed design addresses that combination with models small enough to run per user on a laptop.
+
+\begin{table}[t]
+\caption{Qualitative Comparison With Existing Approaches}
+\label{tab:qualitative}
+\setlength{\tabcolsep}{2.5pt}
+\centering
+\begin{tabular}{|p{33mm}|c|c|c|c|}
+\hline
+Approach & Personal & Online & Queue & Length \\
+\hline
+Silence-removal rules & No & No & No & No \\
+Transcript editors \cite{berthouzoz2012,rubin2013} & Manual & No & No & Manual \\
+LLM-directed editors \cite{wang2024lave,huh2025videodiff} & By prompt & No & No & By prompt \\
+RL from demonstrations \cite{hu2023rlediting} & No & No & No & No \\
+Bandit with no style prior (baseline) & Yes & Yes & No & No \\
+\textbf{Proposed} & \textbf{Yes} & \textbf{Yes} & \textbf{Yes} & \textbf{Yes} \\
+\hline
+\multicolumn{5}{p{78mm}}{Personal: adapts to one user. Online: improves during use. Queue: chooses what to ask about. Length: plans to a target duration.}
+\end{tabular}
+\end{table}
+
+\section{Solution Approach}
+\label{sec:method}
+
+Our system, RoughCut, turns raw speech footage into a set of editing decisions, proposes an action for each with a per-creator bandit, and applies all proposals straight away so that the creator starts from a finished first cut. Corrections then flow back through a reward mapping. What sets it apart is what surrounds the bandit: the style posterior used as its prior, the review queue built from its uncertainty, an exact posterior-sampling planner for target lengths, and propensity logging for counterfactual evaluation. Fig.~\ref{fig:pipeline} shows the full pipeline.
+
+\Figure[t!](topskip=0pt, botskip=0pt, midskip=0pt)[width=\textwidth]{figures/pipeline.pdf}
+{\parbox[t]{0.91\textwidth}{\raggedright Complete pipeline. Orange blocks are the learning components. The top row runs when a clip is uploaded. The bottom row runs each time the creator reacts, and policy state can always be rebuilt by replaying the event log, which is how undo works.}\label{fig:pipeline}}
+
+\subsection{Environment Design}
+
+\subsubsection{Units and Analysis}
+Audio is transcribed with faster-whisper running the small English Whisper model \cite{radford2023}, without conditioning on previous text because conditioning caused looping output over silence. A short disfluency-rich prompt nudges the decoder to keep fillers. Words with no voiced frames beneath them are discarded as hallucinations. Word boundaries are then re-derived by Viterbi alignment of Whisper's characters to the frame-level CTC output of wav2vec 2.0 \cite{baevski2020}, following WhisperX \cite{bain2023}, since Whisper's own timestamps stretch words across pauses.
+
+Two steps go beyond that standard recipe. First, the CTC model's own greedy reading is compared with Whisper's word list using sequence matching, and only two kinds of extra token are trusted: a hesitation sound lasting at least 80 ms, or an exact repeat of a neighboring word. This restored the ``I I'' stutter in our test clip that Whisper had written as one word. Everything else in the greedy reading is ignored, as its spelling is poor. Second, a filler touching its neighbors is cut only if the audio has a dip at both edges. We search within 80 ms of the boundary for a frame at least 6 dB quieter than the speech on either side and move the boundary onto it. A boundary with neither gap nor dip stays, because cutting there clips a neighboring word.
+
+The clip is then segmented into four kinds of unit: phrases (split at gaps of at least 0.25 s and at sentence ends, capped near 6 s), pauses (gaps of at least 0.15 s), filler tokens, and caption lines of at most four words. Retakes receive particular care, as they decide which sentences survive. A fuzzy token match catches content retakes. Because most false starts consist of function words (``you'll also be,''), a separate matcher compares all words of a phrase with the speech that follows it, even across phrase boundaries. A complete earlier delivery beats a later repeat only if it is clearly better spoken, with a margin of 0.08 on a score that penalizes fillers and restarts. Phrase embeddings from a sentence transformer \cite{reimers2019} provide redundancy and topic-centrality scores, and YuNet \cite{wu2023yunet} tracks the face for a 9:16 crop. All of this runs once, at upload.
+
+\subsubsection{State Space}
+Each decision has a context vector $x_t \in \mathbb{R}^{d}$, normalized and partly binned, with $d$ between 16 and 39 depending on its type (Table~\ref{tab:decisions}). Contexts also carry a one-hot video type and a bias term. Decisions are processed left to right, so the context can include history features such as the ratio of output time to source time so far and the time since the last zoom. These features are the only way an earlier action affects a later state in the bandit layer.
+
+\begin{table}[t]
+\caption{Decision Types, Actions, and Context Features}
+\label{tab:decisions}
+\setlength{\tabcolsep}{2.5pt}
+\centering
+\begin{tabular}{|p{11mm}|p{25mm}|c|p{32mm}|}
+\hline
+Type & Actions & $d$ & Representative features \\
+\hline
+Phrase & KEEP, CUT & 39 & duration, retake score, earlier take, incomplete, filler ratio, centrality, redundancy \\
+Pause & KEEP, TIGHT\_40, TIGHT\_15, REMOVE & 21 & gap (log and bins), sentence end, voiced ratio, take boundary \\
+Zoom & NONE, Z115, Z130 & 27 & loudness, punctuation, face size, time since last zoom \\
+Filler & KEEP, REMOVE & 23 & token one-hot, position, gaps, verb-like use of ``like'' \\
+Emphasis & NONE, or one of up to 3 words & 16 & per word: number, proper noun, TF-IDF, stress, negation \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsubsection{Action Space and Dynamics}
+Phrase, pause, zoom, and filler decisions use disjoint arms, with one weight vector per action. Caption emphasis uses a shared weight vector over per-word features, so what is learned about numbers on one line transfers to all lines. Pause actions leave 0.40 s, 0.15 s, or 0.03 s of silence, or keep the gap untouched. All decisions compile into a single edit decision list, the only representation that both the browser preview and the FFmpeg renderer read. Speech edges are padded by 40 ms, every cut has an 8 ms audio fade, and clip edges snap to the 30 frames per second grid so that the rendered length equals the planned length. The transition dynamics are deterministic and known: applying an action changes only the running output time and history counters.
+
+\subsubsection{Reward Design}
+Table~\ref{tab:reward} gives the reward mapping. The reward is defined over the creator's reactions and not over an aesthetic score, so ``good'' simply means ``this creator would keep it''. A binary rejection implies that the other arm was right, and a multi-arm rejection gives only negative evidence, which is why exploration could matter there. Manual edits use the same mapping: deleting at least 70 percent of a phrase counts as a phrase override, whereas a smaller word-level cut is applied but not learned from, because it lies outside the action space. Seeing a unit is tracked by the player, so an untouched suggestion only earns the weak implicit reward if the creator could actually have noticed it.
+
+\begin{table}[t]
+\caption{Reward Mapping for Suggestions and Manual Edits}
+\label{tab:reward}
+\setlength{\tabcolsep}{3pt}
+\centering
+\begin{tabular}{|p{42mm}|p{38mm}|}
+\hline
+Creator's reaction & Bandit update \\
+\hline
+Accept & proposed arm $r=+1$ \\
+Reject, binary decision & proposed $r=-1$; other arm $r=+1$ \\
+Reject, multi-arm decision & proposed $r=-1$ only \\
+Override to $a'$ (panel, transcript, or timeline) & proposed $r=-1$; $a'$ $r=+1$ \\
+Untouched at export, seen & proposed $r=+0.5$ \\
+Untouched, never seen & no update \\
+Undo or redo & flip event flag, replay log \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsubsection{A Worked Example}
+A short passage from one of our recordings shows how these parts meet. The speaker says ``You'll also be learning about what's the difference between green screen and'', stops, and then tries the line several more times (``you'll also be,'' and so on) before finally delivering ``you'll also be learning the difference between green screen and blue screen.'' The content-token matcher sees little here, as the fragments are almost entirely function words. The all-words matcher finds that each fragment reappears at the start of the later speech, so each one receives \texttt{is\_earlier\_take} $=1$ and a high retake score. Those two features then enter the phrase context. They do not decide the edit. A learned weight on them does, which is why a creator could in principle teach the agent to keep such a passage. On this recording, the first cut a new creator receives removes every fragment. The pauses around the fragments merge into one cut, so the viewer hears ``and so much more.'' followed directly by the clean take, with an 8 ms fade at the join.
+
+\subsection{RL Algorithm}
+We chose linear Thompson sampling over PPO or deep Q-learning for three reasons. First, feedback is scarce: a creator supplies hundreds of signals, not millions. Second, the linear model's weights can be read back to the creator as an explanation and as a profile. Third, the closed-form posterior makes undo exact, because replaying the log yields the same state. There is no learning rate or batch size to tune, since the update is a closed-form ridge step applied after every event.
+
+For arm $a$ of a decision type, the expected reward is modeled as $\theta_a^{\top} x$. Prior and data statistics are held separately:
+\begin{align}
+A_a &= \lambda I + A_a^{d}, \qquad \hat\theta_a = A_a^{-1}\left(\lambda\,\theta_a^{0} + b_a^{d}\right), \label{eq:post}\\
+A_a^{d} &\leftarrow \gamma A_a^{d} + w\,x x^{\top}, \qquad b_a^{d} \leftarrow \gamma b_a^{d} + w\,r\,x, \label{eq:upd}
+\end{align}
+where $\lambda$ is the prior strength, $\theta_a^{0}$ the prior mean, $\gamma$ the discount, and $w$ an event weight. To act, the agent draws $\tilde\theta_a \sim \mathcal{N}(\hat\theta_a, v^{2} A_a^{-1})$ and takes
+\begin{equation}
+a_t = \arg\max_a \tilde\theta_a^{\top} x_t, \label{eq:ts}
+\end{equation}
+replaced by a uniform arm with probability $\epsilon$. The action probabilities are estimated from $M=200$ draws,
+\begin{equation}
+p(a \mid x) = (1-\epsilon)\,\frac{1}{M}\sum_{m=1}^{M} \mathbf{1}\left[a = \arg\max_{a'} \tilde\theta_{a'}^{(m)\top} x\right] + \frac{\epsilon}{K}, \label{eq:prop}
+\end{equation}
+and $p(a_t \mid x_t)$ is stored as both the logged propensity and the confidence of the suggestion. The goal is to minimize regret against the creator's own ideal action $a_t^{*}$,
+\begin{equation}
+R_T = \sum_{t=1}^{T} \mathbf{1}\left[a_t \neq a_t^{*}\right], \label{eq:regret}
+\end{equation}
+which counts wrong proposals and is what a creator pays in corrections.
+
+Replaying the log gives the same posterior as the online run because every path through the system, whether from the simulator, the application programming interface, or an undo, applies events through a single learner object. We test that property directly. It also means that a change of prior or a schema migration does not throw away what a creator has taught the agent, since the raw context is stored with each suggestion and the sufficient statistics can be rebuilt.
+
+Linear models also allow an explanation of each suggestion. For the proposed action and its runner-up, the difference of scores decomposes into per-feature contributions $(\hat\theta_{a}-\hat\theta_{a'})_j\,x_j$. The three largest are turned into a sentence in the ``Why?'' panel, and the largest weights across all decisions form the creator's profile page. These are statements about the model and not about the creator's actual reasoning, and we have not studied whether people find them useful.
+
+\subsection{Novel Components}
+
+\subsubsection{Tempered Style Posterior as Prior}
+For $K$ style prototypes $\theta^{(k)}$, ridge-fitted offline, and a pooled generic prior, every event updates a log weight,
+\begin{equation}
+\log w_k \leftarrow \log w_k - \frac{\left(r - \theta^{(k)\top}_{a} x\right)^{2}}{2\sigma^{2}}. \label{eq:style}
+\end{equation}
+With $\sigma=0.7$, the posterior concentrates after a few events and drives the sentence shown to the creator. The bandit, however, uses weights tempered by $(\sigma/\sigma_p)^{2}$ with $\sigma_p=3$ to form its prior mean $\theta^{0}=\sum_k \tilde w_k \theta^{(k)}$. Tempering separates two quantities that a plain latent-bandit posterior ties together: what we say about the creator and how far one click can move the policy. Without it, one rejected KEEP flipped 65 percent of kept phrases on the next video at $\lambda=10$. With a stronger keep/cut prior of $\lambda=30$ that figure fell to 8 percent. The same safety argument removes the $\epsilon$ floor on keep/cut in the product, since a uniform draw there can delete a sentence, and Thompson draws still explore where the posterior is unsure.
+
+\subsubsection{Uncertainty-Ordered Review}
+Suggestions are sorted by $1-p(a_t\mid x_t)$, and those with confidence below 0.7 form the ``needs your eye'' list. Everything else stays applied and available for a spot check. After each correction, unreviewed suggestions are re-scored, with two guards: an action is changed only if Thompson sampling would pick it at least 80 percent of the time, and one nudge moves at most a quarter of a decision type. Fig.~\ref{fig:editor} shows the resulting interface.
+
+\Figure[t!](topskip=0pt, botskip=0pt, midskip=0pt)[width=0.99\columnwidth]{figures/editor.png}
+{Editor on a synthetic test clip: captioned preview, transcript with struck-out cuts, review queue sorted by uncertainty, and a timeline with confidence dots.\label{fig:editor}}
+
+\subsubsection{Target-Length Planning by Posterior Sampling}
+A duration target cannot be enforced one decision at a time. We define an MDP over the phrase and pause decisions in time order. Its state is $s=(o,c)$, with output seconds $o$ on a 0.1 s grid and a flag $c$ for whether the previous phrase was kept. The reward at stage $k$ is the learned model, and the terminal value penalizes missing the target $T$:
+\begin{align}
+r_k(a) &= \theta_a^{\top} x_k, \\
+V_K(o) &= -\beta \max\!\left(0,\tfrac{o}{T}-1-\tau\right) - \beta_u \max\!\left(0,1-\tau-\tfrac{o}{T}\right),
+\end{align}
+with $\beta=150$, $\beta_u=6$, and $\tau=0.05$, so a target works mainly as a limit and a clip whose good edit is shorter is not padded. Backward induction,
+\begin{equation}
+V_k(s) = \max_a \left[ r_k(a) + V_{k+1}\left(s'(s,a)\right) \right], \label{eq:bellman}
+\end{equation}
+gives the exact optimum, because transitions are known. A phrase that continues the sentence of the previous phrase must share its fate, so a length target can never strand half a sentence.
+
+Exploration follows PSRL \cite{osband2013}: once per video, $\theta$ is drawn from the bandit posterior and the MDP is solved for that draw. The plan is closed loop, so a creator's override simply moves the state to another row of the solved table. Propensities are the share of 16 further posterior draws whose optimal plan takes the same action at that state. Since the planner's step model only approximates the rendered edit, the planned target is corrected against the real edit length, up to twice per video.
+
+The design decision worth reporting is the treatment of history features. In the first version, they followed the MDP state. The result looked exact but was badly wrong: on simulated test videos the solver found that cutting every phrase was optimal, as the linear model had never seen a state like ``everything cut so far'' and extrapolated high reward there. This is the model exploitation problem described in model-based RL \cite{janner2019,yu2020}, here in a miniature and exactly solvable form. We now hold those features at their values along the bandit's own posterior-mean trajectory, which keeps the reward inside the data's support. The cost is that the reward no longer reacts to the plan's own history, so the only sequential coupling that remains is the length budget and the sentence ties.
+
+The cost of an exact solution is modest. For $K$ stages, $n$ buckets of output time, and at most four actions, backward induction takes $O(K\,n)$ table operations per solve, vectorized over the grid. A typical video has about 65 stages and a few hundred buckets. One complete planning call involves up to three solves for calibration and 17 more for the acting plan and the propensity draws, and it finishes in about one second on a laptop CPU (Table~\ref{tab:runtime}). A sampled policy-gradient method would need far more computation to approximate the same table, and its result would be harder to explain.
+
+\subsubsection{Counterfactual Evaluation}
+Each logged suggestion stores $(x_i,a_i,p_i,r_i)$. For a target policy $\pi$, with weight $w_i=\pi(a_i\mid x_i)/p_i$ and a cross-fitted ridge reward model $\hat q$, we compute the direct method (DM), inverse propensity scoring (IPS), self-normalized IPS (SNIPS), and doubly robust (DR) estimates, plus self-normalized DR (SNDR):
+\begin{equation}
+\hat V_{\mathrm{DR}} = \frac{1}{n}\sum_{i=1}^{n}\Big[\sum_a \pi(a\mid x_i)\hat q(x_i,a) + w_i\big(r_i-\hat q(x_i,a_i)\big)\Big]. \label{eq:dr}
+\end{equation}
+Decisions within a video are dependent, so the bootstrap resamples whole videos. With few videos, percentile intervals were too narrow \cite{cameron2008}. We therefore report the estimate $\pm\, t_{G-1,0.975}\sqrt{G/(G-1)}$ times the bootstrap standard deviation, for $G$ videos.
+
+\subsection{Algorithm Description}
+Algorithm~\ref{alg:main} gives the online loop and Algorithm~\ref{alg:plan} the planner. There is no stopping condition during use, because the agent learns for as long as the creator keeps editing, with style weights frozen after 200 events. Each simulated experiment stops after a fixed number of videos.
+
+\begin{algorithm}[t]
+\caption{Online Editing Agent for One Creator}
+\label{alg:main}
+\begin{algorithmic}[1]
+\small
+\STATE Load prototypes; set $\log w_k \leftarrow 0$, $A^{d},b^{d}\leftarrow 0$
+\STATE Set prior mean $\theta^{0}$ from tempered $w$
+\FOR{each uploaded video}
+\STATE Analyze the clip into units and features
+\IF{a target length is set}
+\STATE Solve the planner (Algorithm~\ref{alg:plan})
+\ENDIF
+\FOR{each decision $t$ in time order}
+\STATE Observe context $x_t$ (static features and history)
+\STATE $a_t\leftarrow$ planner action if planned, otherwise \eqref{eq:ts}
+\STATE Compute and log $p(a_t\mid x_t)$ by \eqref{eq:prop}; apply $a_t$
+\ENDFOR
+\STATE Sort the review queue by $1-p(a_t\mid x_t)$
+\WHILE{the creator is editing}
+\STATE Observe an event; map it to updates (Table~\ref{tab:reward})
+\STATE Update $A^{d},b^{d}$ by \eqref{eq:upd} and $w$ by \eqref{eq:style}
+\STATE Recompute $\theta^{0}$; re-score unreviewed suggestions
+\STATE On undo: flag the event and replay the log
+\ENDWHILE
+\STATE At export: give seen, untouched suggestions $r=+0.5$
+\ENDFOR
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[t]
+\caption{Target-Length Planner with Posterior Sampling}
+\label{alg:plan}
+\begin{algorithmic}[1]
+\small
+\REQUIRE Stages with frozen history features, target $T$, posterior
+\STATE Solve \eqref{eq:bellman} with posterior means $\hat\theta$
+\FOR{up to two calibration rounds}
+\STATE Roll out the plan and measure the real edit length $L$
+\STATE \textbf{if} $|L-T|/T \leq \tau/2$ \textbf{then} stop
+\STATE Shift the planned target by $T-L$ and solve again
+\ENDFOR
+\STATE Draw $\tilde\theta\sim$ posterior; solve \eqref{eq:bellman}: acting plan
+\STATE Solve for 16 more draws: propensity plans
+\FOR{each stage reached, at the state $(o,c)$ actually observed}
+\STATE Act by table look-up in the acting plan
+\STATE Propensity $\leftarrow$ share of draws with the same action
+\ENDFOR
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{System Implementation}
+The method is deployed in a complete editor so that feedback comes from realistic use. The backend is written with FastAPI and stores projects, suggestions, and events in SQLite. The frontend, in React and TypeScript, renders the edit decision list in the browser with skip ranges, CSS transforms for crop and zoom, and HTML captions, so no server render is needed while editing. Export uses an FFmpeg filter graph that crops from the original source, burns in captions, applies high-pass filtering, and normalizes loudness to $-$14 LUFS over two passes. Optional background music is ducked under speech with sidechain compression.
+
+Three design choices matter for learning. First, there is one contract: every action becomes an event, and the backend answers each event with the new edit decision list, re-scored suggestions, and the style summary, so preview and export cannot disagree on timing. Second, the policy is a cache. It is saved per user for speed, but a stale or missing cache is rebuilt from the log, and a test confirms that replay equals the online result. Third, settings that are merely remembered, such as caption style, music level, and speed, are kept apart from the learned decisions. They are running defaults and we make no RL claim about them.
+
+Batch uploads use the posterior mean without exploration. A video is marked ready to post when the sum of $1-$confidence over its suggestions is below 3 and the creator's recent acceptance rate is at least 0.85. One-click export from that state deliberately produces no training signal, because nobody reviewed anything. More than 300 automated backend tests cover the reward mapping, replay, and timing rules, and a further 160 cover the interface. They verify the implementation and do not validate the method.
+
+\section{Experimental Results}
+\label{sec:results}
+
+\subsection{Experimental Setup}
+
+\subsubsection{Environment and Data}
+Offline RL datasets of real creators' corrections do not exist for this task and we have not yet collected our own, so the main evaluation uses a simulator. Synthetic videos are generated as timed transcripts with planted mistakes: abandoned takes followed by retakes, tangents, fillers, long pauses, and joins between takes. They then pass through the same segmentation, filler, pause, and feature code as real footage, so the agent sees the same state representation. Each video has roughly 160 decisions.
+
+Simulated creators are six personas with hidden rules for every decision type (Table~\ref{tab:personas}). A persona reviews a proposal, gives a label that is wrong with probability 0.05, and corrects a disagreement with probability 0.6. Half of these corrections are made as manual edits passing through the real classification code. All priors are fitted without the persona under test (leave-one-style-out), on training videos disjoint from the evaluation videos, so a persona's own prototype is never available to it. We also use two recorded clips for the analysis layer.
+
+\begin{table}[t]
+\caption{Simulated Creators (Hidden Ground Truth)}
+\label{tab:personas}
+\setlength{\tabcolsep}{2.5pt}
+\centering
+\begin{tabular}{|p{14mm}|p{32mm}|p{31mm}|}
+\hline
+Persona & Pauses & Phrases, fillers, zoom \\
+\hline
+Snappy & remove over 0.5 s, else 0.15 s & cut fillery or garbled; remove all fillers; zoom on loud lines \\
+Relaxed & keep under 0.8 s, else 0.40 s & cut earlier takes; remove um, uh; no zoom \\
+Storyteller & 0.40 s after sentence end, else remove & keep story; remove um, uh, you know; zoom on ? and ! \\
+Minimalist & remove all & keep most central up to 30 s; no zoom \\
+Focused & all to 0.15 s & cut off-topic and repeats; zoom on central lines \\
+Blend & as Snappy & phrases and zooms as Storyteller \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsubsection{Hardware and Software}
+All runs used one Windows 11 laptop with an Intel processor reporting 16 logical cores and no GPU. The software was Python 3.10, NumPy 2.2, SciPy 1.15, faster-whisper 1.2, PyTorch 2.14 (CPU), Transformers 5.18, Sentence-Transformers 6.1, OpenCV 5.0, and FFmpeg 9.0. Agents are our own implementation; Gymnasium and Stable Baselines3 are not used because the planner is solved exactly.
+
+\subsubsection{Hyperparameters}
+Table~\ref{tab:hyper} lists the settings. The terms learning rate and batch size from deep RL have no direct counterpart here. The update of \eqref{eq:upd} is closed-form and applies per event, so the closest analogs are $\lambda$ and $\gamma$. An episode is one video and an environment step is one decision. Unless noted, results use ten seeds per persona, or 60 runs per method, and ten videos per run. Intervals are 95 percent $t$ intervals over runs.
+
+\begin{table}[t]
+\caption{Hyperparameters}
+\label{tab:hyper}
+\setlength{\tabcolsep}{3pt}
+\centering
+\begin{tabular}{|p{42mm}|c|c|}
+\hline
+Parameter & Simulator & Product \\
+\hline
+Prior strength $\lambda$ & 2 & 10 (keep/cut 30) \\
+Posterior scale $v$ & 0.25 & 0.25 \\
+Discount $\gamma$ & 0.995 & 0.995 \\
+Exploration floor $\epsilon$ & 0.02 & 0.02 (keep/cut 0) \\
+Thompson draws $M$ & 200 & 200 \\
+Style width $\sigma$ / prior width $\sigma_p$ & 0.7 / none & 0.7 / 3 \\
+Implicit reward & 0.5 & 0.5 \\
+Style frozen after & 200 events & 200 events \\
+Planner $\beta$, $\beta_u$, $\tau$, grid, draws & \multicolumn{2}{c|}{150, 6, 0.05, 0.1 s, 16} \\
+Episodes per run / seeds per persona & \multicolumn{2}{c|}{10 / 10} \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{Performance Evaluation}
+
+\subsubsection{Metrics}
+Acceptance is the share of proposals equal to the creator's ideal action. Return per decision is the mean realized reward from Table~\ref{tab:reward}. We use cumulative regret from \eqref{eq:regret}. Success, the task-level condition, means that a video reaches at least 85 percent acceptance, measured over videos 6 to 10. Steps to target is the number of decisions until a run first completes a video at or above 85 percent. Corrections per minute of footage measure the effort that remains. For target lengths we report relative length error measured on the real edit, and for review the share of correct decisions in the exported edit. Together these are the problem-specific metrics for this domain.
+
+\subsubsection{Learning and Regret}
+Fig.~\ref{fig:learning} shows return and regret over environment steps. Return rises steeply over the first 500 decisions, about three videos, and then flattens. Both fixed baselines stay flat, as expected, and the learners separate from them on the first video. Table~\ref{tab:compare} gives the numbers. The proposed method ends at 90.7 percent acceptance with 184.5 wrong proposals in 10 videos, whereas Rule makes 670.2 and Global 780.5.
+
+\Figure[t!](topskip=0pt, botskip=0pt, midskip=0pt)[width=\textwidth]{figures/learning.pdf}
+{\parbox[t]{0.91\textwidth}{\raggedright (a) Mean return per decision and (b) cumulative regret over environment steps, across six creators and ten seeds. Bands show 95 percent confidence intervals. The learners rise quickly and stabilize, and their bands narrow, whereas the fixed policies stay flat.}\label{fig:learning}}
+
+\begin{table*}[t]
+\caption{Comparison With Benchmark Methods (Six Creators, Ten Seeds, Ten Videos; $\uparrow$ Higher Is Better, $\downarrow$ Lower Is Better)}
+\label{tab:compare}
+\setlength{\tabcolsep}{3.5pt}
+\centering
+\begin{tabular}{|l|c|c|c|c|c|c|c|c|}
+\hline
+Method & Video 1 $\uparrow$ & Video 5 $\uparrow$ & Video 10 $\uparrow$ & Return $\uparrow$ & Success $\uparrow$ & Steps to 85\% $\downarrow$ & Regret $\downarrow$ & Corr./min $\downarrow$ \\
+\hline
+Rule (one-click tool) & 0.593 & 0.595 & 0.587 $\pm$ 0.032 & 0.401 & 0.000 & never & 670.2 $\pm$ 45.0 & 20.01 \\
+Global prior, no learning & 0.522 & 0.516 & 0.515 $\pm$ 0.035 & 0.293 & 0.000 & never & 780.5 $\pm$ 45.9 & 22.69 \\
+$\epsilon$-greedy & 0.776 & 0.861 & 0.875 $\pm$ 0.010 & 0.774 & 0.660 & 523.5 & 236.2 $\pm$ 14.6 & 7.76 \\
+LinUCB & 0.780 & 0.874 & 0.902 $\pm$ 0.012 & 0.807 & 0.797 & 495.5 & 207.9 $\pm$ 13.5 & 6.65 \\
+LinTS, generic prior & 0.788 & 0.882 & 0.899 $\pm$ 0.011 & 0.799 & 0.860 & 473.0 & 198.5 $\pm$ 14.8 & 6.59 \\
+\textbf{LinTS, style prior (proposed)} & \textbf{0.805} & \textbf{0.891} & \textbf{0.907 $\pm$ 0.011} & 0.806 & 0.897 & \textbf{348.0} & \textbf{184.5 $\pm$ 11.5} & 6.31 \\
+Proposed, product settings & 0.808 & 0.888 & 0.905 $\pm$ 0.009 & 0.809 & 0.903 & 349.5 & 185.7 $\pm$ 11.2 & 6.28 \\
+\hline
+\end{tabular}
+\end{table*}
+
+\subsubsection{Acceptance by Decision Type}
+Fig.~\ref{fig:bytype} separates the five decision types. Pauses are where rules do worst, at 0.42 on video 10, because the personas disagree most on them, and they are where learning gains most (0.96). Keep/cut starts high for every method because most phrases should be kept, and here the Rule baseline's 0.87 is close to the learners. Emphasis is the hardest learned decision at 0.86, as our features only partly explain the choice of word.
+
+\Figure[t!](topskip=0pt, botskip=0pt, midskip=0pt)[width=\textwidth]{figures/by_type.pdf}
+{\parbox[t]{0.91\textwidth}{\raggedright Acceptance per decision type over ten videos. The gain from personalization is largest on pauses, which is where creators' preferences differ the most. On keep/cut, a good rule is already close to the learners.}\label{fig:bytype}}
+
+\Figure[t!](topskip=0pt, botskip=0pt, midskip=0pt)[width=\textwidth]{figures/by_persona.pdf}
+{\parbox[t]{0.91\textwidth}{\raggedright Acceptance per creator over ten videos, ten seeds each. Bands show 95 percent intervals. The learners overtake Rule on the first video for every creator, and Minimalist settles lowest among the learners.}\label{fig:persona}}
+
+Fig.~\ref{fig:persona} and Table~\ref{tab:persona} repeat the comparison per creator. The proposed method is ahead of Rule for all six, by 17 to 50 points. The gap is smallest for Blend and Snappy, whose pause rule resembles the one in the Rule baseline, and largest for Relaxed and Minimalist, whom a fixed cut-everything-over-half-a-second policy serves poorly. Against plain LinTS the style prior helps most on Snappy and Blend. On Storyteller it is slightly behind (0.895 against 0.905) and on Focused it makes no difference, so the mean improvement is not a uniform one.
+
+\begin{table}[t]
+\caption{Acceptance on the Tenth Video per Simulated Creator}
+\label{tab:persona}
+\setlength{\tabcolsep}{3pt}
+\centering
+\begin{tabular}{|l|c|c|c|c|c|}
+\hline
+Creator & Rule & Global & LinUCB & LinTS & Proposed \\
+\hline
+Snappy & 0.703 & 0.627 & 0.870 & 0.880 & \textbf{0.901} \\
+Relaxed & 0.472 & 0.359 & 0.967 & 0.957 & \textbf{0.970} \\
+Storyteller & 0.673 & 0.600 & \textbf{0.913} & 0.905 & 0.895 \\
+Minimalist & 0.419 & 0.326 & 0.862 & 0.853 & \textbf{0.863} \\
+Focused & 0.529 & 0.515 & \textbf{0.922} & 0.914 & 0.914 \\
+Blend & 0.725 & 0.660 & 0.878 & 0.882 & \textbf{0.898} \\
+\hline
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:type} gives the same breakdown by decision type. The product settings, which use a stronger keep/cut prior, trade about three points of keep/cut acceptance (0.885 against 0.917) for protection against sudden large changes, and they recover the difference on pauses and emphasis. This is a deliberate choice. A wrong CUT removes what someone said, whereas a wrong pause length is hardly noticed, so we accept lower simulated keep/cut acceptance in exchange for slower movement on that one decision type.
+
+\begin{table}[t]
+\caption{Acceptance on the Tenth Video per Decision Type}
+\label{tab:type}
+\setlength{\tabcolsep}{3pt}
+\centering
+\begin{tabular}{|l|c|c|c|c|c|}
+\hline
+Method & Keep/cut & Pause & Filler & Zoom & Emphasis \\
+\hline
+Rule & 0.869 & 0.416 & 0.731 & 0.746 & 0.436 \\
+Global prior & 0.843 & 0.303 & 0.629 & 0.604 & 0.402 \\
+LinUCB & 0.900 & 0.951 & 0.962 & 0.943 & 0.871 \\
+LinTS, generic prior & 0.894 & 0.946 & 0.950 & 0.949 & 0.867 \\
+Proposed & 0.917 & 0.959 & 0.944 & 0.962 & 0.864 \\
+Product settings & 0.885 & 0.969 & 0.955 & 0.948 & 0.877 \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsubsection{Stability Across Seeds}
+Fig.~\ref{fig:seeds} shows the spread for individual creators. The standard deviation of per-seed mean acceptance at video 10 is 0.013 for the proposed method and 0.011 for the plain bandit, both small compared with the 0.32 gap from Rule. Most of the spread across all runs (0.041) comes from differences among personas and not from randomness, since Relaxed reaches 0.970 and Minimalist only 0.863. Minimalist's rule depends on a per-video ranking of centrality that a linear model cannot fully represent.
+
+\Figure[t!](topskip=0pt, botskip=0pt, midskip=0pt)[width=0.99\columnwidth]{figures/seeds.pdf}
+{Acceptance on the tenth video across ten seeds, per creator. The spread across seeds is small next to the difference between creators, and Rule comes closest on Snappy and Blend, whose rules resemble its own.\label{fig:seeds}}
+
+\subsubsection{Computational Efficiency}
+Table~\ref{tab:runtime} shows the learner's cost, measured on one thread while other jobs ran on the machine. A suggestion takes under 1 ms on average, so it is the media analysis and not the learning that determines waiting time. The whole model has 305 parameters per creator and its data statistics occupy 67 KiB. The analysis of a 54.5 s clip took 53 s in the running application with models preloaded, and 130 to 209 s in a fresh process that also loaded the models while the experiments ran.
+
+\begin{table}[t]
+\caption{Computational Cost of the Learner (One Thread)}
+\label{tab:runtime}
+\setlength{\tabcolsep}{4pt}
+\centering
+\begin{tabular}{|l|c|c|}
+\hline
+Operation & Mean & 95th percentile \\
+\hline
+Thompson choice with 200 draws (ms) & 0.46 & 1.83 \\
+Update of one arm (ms) & 0.15 & 0.27 \\
+Plan one video, 65 stages (ms) & 983 & 1092 \\
+\hline
+Parameters per creator & \multicolumn{2}{c|}{305} \\
+Data statistics per creator (KiB) & \multicolumn{2}{c|}{67} \\
+Simulated run, 10 videos, 1600 decisions (s) & \multicolumn{2}{c|}{3.7} \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{Results and Discussion}
+
+\subsubsection{Does the Style Prior Fix the Cold Start?}
+On videos 1 to 3, acceptance is 0.823 with no prior, 0.830 with a generic prior, and 0.848 with the style mixture. The improvement is real but modest, and it fades as expected: by video 6 the three curves lie within 0.5 points of each other (0.891, 0.890, 0.894). Personal data eventually dominates any prior. What the prior buys is time. The median number of decisions to reach an 85 percent video drops from 473 to 348, about one fewer video before the tool feels right. The style itself is identified (weight above 0.8) after a median of 3.5 events, although Snappy takes 7.5 and at most 21, as it overlaps with Blend. These numbers come from leave-one-style-out priors, so they probably describe a new creator somewhat similar to the known styles, and a person who resembles none of them should expect less.
+
+\Figure[t!](topskip=0pt, botskip=0pt, midskip=0pt)[width=0.99\columnwidth]{figures/coldstart.pdf}
+{Acceptance on the first six videos under three priors, with the evaluated style excluded from the prior. The style mixture leads early and the curves meet as personal data accumulates.\label{fig:cold}}
+
+Fig.~\ref{fig:cold} shows how the gap closes. The lead of the style mixture is largest on the first video (0.805 against 0.768 with no prior) and is gone by the fourth, where all three are near 0.88. A paired test on the first three videos gives a gain of 1.8 points over the generic prior ($p<0.001$). In practical terms, this is about 14 fewer wrong proposals across ten videos against the generic prior, and it costs almost nothing to compute: one mixture update per event.
+
+\subsubsection{Is the Policy Personalized?}
+Fig.~\ref{fig:cross} trains on one persona and evaluates the frozen policy on each. The diagonal averages 0.940 and the off-diagonal 0.466, so a policy that is excellent for one creator is close to useless for another. Blend and Snappy are the expected exception at about 0.85 to 0.87, since they share pause, filler, and emphasis rules by construction. This result supports the premise that a single global model cannot serve everyone and is the largest effect in the paper. It should still be read with care, because we wrote personas to differ.
+
+\Figure[t!](topskip=0pt, botskip=0pt, midskip=0pt)[width=0.99\columnwidth]{figures/cross.pdf}
+{Frozen policies applied to each creator on unseen videos. The dominant diagonal shows that learned policies are specific to the creator they were trained on.\label{fig:cross}}
+
+\subsubsection{Can It Follow Changing Taste?}
+Fig.~\ref{fig:drift} shows a creator who switches from Relaxed to Snappy at video 6. Acceptance collapses to 0.53 with no discounting, 0.61 with $\gamma=0.995$, and 0.67 with $\gamma=0.98$, and all three recover above 0.8 within three videos. Stronger discounting recovers more of the immediate drop but pays for it, with lower acceptance before the switch (0.943 against 0.960) and at the end of the run (0.827 against 0.878). Discounting costs accuracy in stationary conditions, as the ablation also shows, so the choice of $\gamma=0.995$ is a compromise rather than an optimum.
+
+\Figure[t!](topskip=0pt, botskip=0pt, midskip=0pt)[width=0.99\columnwidth]{figures/drift.pdf}
+{Style change at video 6 for three discount factors. Stronger discounting softens the drop at the switch but lowers the level reached before and after it.\label{fig:drift}}
+
+\subsubsection{Does Length Need Planning?}
+Fig.~\ref{fig:target} compares the bandit and the bandit with planner, both trained online and then frozen on four unseen videos, for targets of 20, 30, and 45 s. The bandit's length error remains 45.7 percent after six videos, because nothing in a per-decision policy knows the target. With the planner, the error ends at 4.0 percent, below the 5 percent tolerance, and it is small from the first video onward because the target is enforced by planning rather than learned. It costs 1.2 points of acceptance (0.879 against 0.891), which is the price of following the length constraint. Keep/cut acceptance stays near 0.68 for both, so neither reproduces Minimalist's choice of which phrases to keep. Planning fixes the length without fixing the selection, and this is the method's clearest unsolved problem.
+
+\Figure[t!](topskip=0pt, botskip=0pt, midskip=0pt)[width=0.99\columnwidth]{figures/target.pdf}
+{Unseen videos for a creator with a target length. Left: relative length error on a logarithmic axis. Right: acceptance.\label{fig:target}}
+
+Table~\ref{tab:target} splits the result by target. Tighter targets are harder for the bandit, with 59.8 percent error at 20 s, as a 20 s target needs more cutting than any learned habit provides, whereas the planner stays under 6 percent at all three.
+
+\begin{table}[t]
+\caption{Relative Length Error on Unseen Videos by Target}
+\label{tab:target}
+\setlength{\tabcolsep}{5pt}
+\centering
+\begin{tabular}{|l|c|c|c|}
+\hline
+Method & 20 s & 30 s & 45 s \\
+\hline
+Bandit only & 0.598 & 0.438 & 0.333 \\
+Bandit with planner & 0.042 & 0.057 & 0.023 \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsubsection{Does the Queue Save Effort?}
+Fig.~\ref{fig:review} varies the share of decisions a creator is willing to review. At 30 percent, an uncertainty-ordered queue gives 0.866 correct decisions in the export, against 0.783 for random order and 0.634 for timeline order. At full review, all three are the same, within 0.5 points, as they must be. The gain comes from catching errors: confidence predicts mistakes well enough that the same effort fixes more of them. Policies trained at a 30 percent budget also score higher when frozen after uncertainty-ordered review (0.845 against 0.806), which suggests that the queue selects useful training samples too, though the difference is near the width of the intervals.
+
+\Figure[t!](topskip=0pt, botskip=0pt, midskip=0pt)[width=0.99\columnwidth]{figures/review.pdf}
+{Quality of the exported edit against review budget. Uncertainty order dominates below full review and converges with the others at 100 percent.\label{fig:review}}
+
+\Figure[t!](topskip=0pt, botskip=0pt, midskip=0pt)[width=0.99\columnwidth]{figures/calibration.pdf}
+{Reliability of the confidence attached to each suggestion, across six creators and six seeds. At $v=0.25$ and $v=0.5$ it stays near the diagonal. At $v=0.05$ the posterior is too narrow and the agent is overconfident.\label{fig:calib}}
+
+\subsubsection{Can Confidence Be Trusted?}
+The queue only works if confidence tracks mistakes, so we measured that directly (Fig.~\ref{fig:calib}, Table~\ref{tab:calib}). At the default $v=0.25$ the expected calibration error over about 58\,000 suggestions is 0.021. Suggestions below the 0.7 threshold make up 10.6 percent of the total and are right only 37.4 percent of the time, whereas those above it are right 94.5 percent of the time. The area under the curve for telling right from wrong is 0.89. So a creator who looks only at the flagged tenth is looking where most errors are.
+
+This is what a smaller $v$ loses. At $v=0.05$, acceptance is higher (0.917 against 0.899 late in training), but the area under the curve falls to 0.72 and only 3.2 percent of suggestions fall below the threshold, so many mistakes go unflagged. At $v=0.5$ the ranking is sharper (0.94), but 18.5 percent are flagged and acceptance falls to 0.874. Our $v=0.25$ is a compromise between those. This result also gives a more accurate account of what Thompson sampling contributes in this system. It does not seem to help learning under our feedback model, but a posterior of the right width produces an uncertainty signal that a creator can use.
+
+\begin{table}[t]
+\caption{Confidence as a Predictor of Mistakes}
+\label{tab:calib}
+\setlength{\tabcolsep}{3pt}
+\centering
+\begin{tabular}{|l|c|c|c|}
+\hline
+Measure & $v=0.05$ & $v=0.25$ & $v=0.5$ \\
+\hline
+Expected calibration error & 0.065 & 0.021 & 0.023 \\
+Area under the curve (right vs. wrong) & 0.716 & 0.892 & 0.940 \\
+Share flagged (confidence $<0.7$) & 0.032 & 0.106 & 0.185 \\
+Correct among flagged & 0.304 & 0.374 & 0.370 \\
+Correct among not flagged & 0.918 & 0.945 & 0.963 \\
+Late acceptance (videos 8--10) & 0.917 & 0.899 & 0.874 \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsubsection{Can a Policy Be Judged Offline?}
+Fig.~\ref{fig:ope} and Table~\ref{tab:ope} evaluate policies from LinTS logs, with simulator truth as reference. All estimators rank the learned policy first by a wide margin and estimate it within 2.5 points (true 0.932, DR 0.943), and they recover the order of Rule (0.749, DR 0.738) and the generic prior (0.703, DR 0.701). DM has the lowest error (RMSE 0.066) but its bias makes its intervals almost useless, covering the truth only 43 percent of the time. DR has much smaller bias (0.007) and the best coverage, 88 percent. The small-sample $t$ correction raised coverage from the 71 to 78 percent we saw with percentile intervals, but it still falls short of the nominal 95 percent. Part of the shortfall is likely adaptive logging \cite{hadad2021}. The effective sample size is just 15 percent of the 950 logged decisions per creator, because LinTS quickly becomes confident and stops supporting other actions. Offline evaluation in this setting therefore works for ranking clearly different policies, but not for detecting small differences.
+
+\Figure[t!](topskip=0pt, botskip=0pt, midskip=0pt)[width=\textwidth]{figures/ope.pdf}
+{\parbox[t]{0.91\textwidth}{\raggedright Off-policy evaluation against simulator truth. (a) Error of each estimator. (b) True value and doubly robust estimate of four target policies, computed only from the logs of the learning agent.}\label{fig:ope}}
+
+\begin{table}[t]
+\caption{Off-Policy Estimators Against Simulator Truth}
+\label{tab:ope}
+\setlength{\tabcolsep}{4pt}
+\centering
+\begin{tabular}{|l|c|c|c|c|}
+\hline
+Estimator & Bias & RMSE & 95\% CI coverage & Picks best \\
+\hline
+DM & 0.040 & 0.066 & 0.43 & 1.00 \\
+IPS & 0.009 & 0.160 & 0.73 & 0.69 \\
+SNIPS & 0.020 & 0.133 & 0.73 & 0.92 \\
+DR & 0.007 & 0.145 & 0.88 & 0.86 \\
+SNDR & 0.009 & 0.147 & 0.84 & 0.83 \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsubsection{Real Audio}
+Simulation says nothing about whether the speech analysis works, so we ran two clips through the actual pipeline and compared the first cut a brand-new creator would receive with a reference we edited by hand (Table~\ref{tab:real}). The first clip is a 44.2 s recording of a person with a real chain of restarts: four abandoned attempts at one sentence followed by the clean take, and unrelated background speech in a 7 s gap. The first cut keeps all the right lines and drops every abandoned attempt. Its only word difference from the reference is Whisper writing ``I'll'' for ``I will''. The second is a 54.5 s scripted stress clip with a synthetic voice, containing fillers, a stutter, hedges, a three-attempt restart, and a sentence where the first delivery is the good one. The agent resolved all of them correctly and retained one filler (``basically''), which has no audio dip around it.
+
+\begin{table}[t]
+\caption{First Cut Against a Hand-Made Reference on Recorded Clips}
+\label{tab:real}
+\setlength{\tabcolsep}{3pt}
+\centering
+\begin{tabular}{|p{37mm}|c|c|}
+\hline
+Measure & Real speaker & Scripted stress clip \\
+\hline
+Source length (s) & 44.2 & 54.5 \\
+First cut length (s) & 22.1 & 19.2 \\
+Clips in the edit & 5 & 12 \\
+Suggestions / flagged for review & 50 / 12 & 69 / 7 \\
+Reference words & 94 & 70 \\
+Word differences (word error rate) & 2 (2.1\%) & 1 (1.4\%) \\
+\hline
+\multicolumn{3}{p{80mm}}{Differences are measured on caption words. The reference keeps Whisper's spelling of the speaker's name, since a spelling error is not an editing error.}
+\end{tabular}
+\end{table}
+
+These are encouraging results but very thin evidence. The sample is two clips, the references were made by the authors, and the comparison is on words rather than listening. An earlier version of this same pipeline left a stuttered scrap of a restart in the first clip's edit, which we found only through this comparison and fixed. There are certainly more such problems in footage we have not tried.
+
+\subsubsection{What Did the Model Learn?}
+Acceptance alone does not show whether the learned weights make sense, so we queried the posterior means directly. We trained with no prior, for ten videos and six seeds, so that everything comes from feedback, and then scored hand-built contexts (Table~\ref{tab:learned}). The sign of each entry says which action the model favors. The results read like the personas' hidden rules. All three creators remove ``um'', but only Snappy removes ``like'', and the others keep it. A 0.6 s pause is removed by Snappy, kept firmly by Relaxed, and left almost neutral by Storyteller, whose rule depends on the sentence boundary more than on length. Relaxed changes its mind between 0.6 s and 1.5 s, which is the threshold in its rule. An earlier take is cut and an ordinary phrase is kept by all, the behavior shared by every style. This is the basis of the profile page, and it also shows a benefit of keeping the model linear: such a check takes a few lines of code.
+
+\begin{table}[t]
+\caption{Learned Advantage of One Action Over Another (Posterior Means, No Prior)}
+\label{tab:learned}
+\setlength{\tabcolsep}{3pt}
+\centering
+\begin{tabular}{|l|c|c|c|}
+\hline
+Context and contrast & Snappy & Relaxed & Storyteller \\
+\hline
+``um'': REMOVE $-$ KEEP & +0.94 & +0.87 & +0.73 \\
+``like'': REMOVE $-$ KEEP & +1.05 & $-$0.40 & $-$0.46 \\
+Pause 0.6 s: REMOVE $-$ KEEP & +0.98 & $-$0.86 & +0.15 \\
+Pause 1.5 s: REMOVE $-$ KEEP & +1.16 & +0.14 & +0.19 \\
+Earlier take: CUT $-$ KEEP & +0.49 & +0.59 & +0.62 \\
+Ordinary phrase: CUT $-$ KEEP & $-$0.81 & $-$0.87 & $-$0.83 \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{Comparison With Existing Methods}
+Table~\ref{tab:compare} is the main benchmark. Compared with the Rule baseline, modeled on what one-click tools do, the proposed method cuts regret by 72 percent and corrections per minute of footage by 68 percent, from 20.0 to 6.3. Against the unadapted Global prior the gap is wider still, which shows that a pooled model is worse than a simple rule when styles disagree. Among learners, the differences are much smaller. Video 10 acceptance for LinUCB (0.902) and proposed (0.907) overlaps within intervals, and regret differs by 23 decisions out of about 1600. A paired comparison on matched persona and seed puts the regret advantage of the proposed method at 23.4 $\pm$ 9.4 decisions over LinUCB and 14.0 $\pm$ 9.3 over plain LinTS, both with $p<0.01$. On video 10 alone it is not distinguishable from LinUCB ($p=0.34$) and only borderline against plain LinTS ($p=0.05$). No correction for multiple comparisons was applied, so the borderline result should not be relied on. The proposed prior is the visible difference: it helps the early videos and does little later on. We did not implement a deep RL baseline. PPO was in the original plan, but at about 160 decisions per video it would see only 1600 samples in the experiment's horizon, so we judged a comparison uninformative and did not run it. This remains an assumption and not a result.
+
+\subsection{Ablation Study}
+Table~\ref{tab:ablation} and Fig.~\ref{fig:ablation} remove one component at a time, with paired seeds. Three components make clear positive contributions. Manual-edit mapping adds 2.6 points on early videos, as half of the corrections would otherwise be lost. Retake features add 2.2 points early and 1.6 late, the largest lasting effect, as expected since every persona cuts earlier takes. The style prior adds 1.8 points early and 0.6 late. Removing the prior altogether gives the largest early drop among prior variants (2.5) but no late penalty. Semantic and history features have almost no effect in the simulator. For semantic features that may be partly an artifact, because synthetic embeddings are only crude stand-ins for language.
+
+Three removals do not hurt, and two of them improve the score, which runs against the usual narrative. Removing implicit feedback changes little (+0.3 late, within noise). Removing discounting adds 1.9 points late, which is expected since these personas do not drift, and Fig.~\ref{fig:drift} shows the opposing case. The more important result is exploration: a policy with $v=0$ and $\epsilon=0$ scores 2.4 points higher early and 2.8 later, with regret of 141.5 against 184.5.
+
+\begin{table}[t]
+\caption{Ablation: Change in Acceptance Against the Full Method}
+\label{tab:ablation}
+\setlength{\tabcolsep}{3pt}
+\centering
+\begin{tabular}{|l|c|c|c|}
+\hline
+Removed & Videos 1--3 & Videos 8--10 & Regret \\
+\hline
+Nothing (full method) & 0.848 & 0.901 & 184.5 \\
+\hline
+Manual-edit mapping & $-$0.026 & $-$0.005 & 206.5 \\
+Prior altogether & $-$0.025 & +0.001 & 198.5 \\
+Retake features & $-$0.022 & $-$0.016 & 213.5 \\
+Style prior (generic kept) & $-$0.018 & $-$0.006 & 198.5 \\
+Semantic features & $-$0.006 & 0.000 & 190.5 \\
+Implicit feedback & $-$0.001 & +0.003 & 179.9 \\
+History features & +0.001 & $-$0.001 & 184.2 \\
+Discounting & 0.000 & +0.019 & 166.5 \\
+Exploration & +0.024 & +0.028 & 141.5 \\
+\hline
+\end{tabular}
+\end{table}
+
+\Figure[t!](topskip=0pt, botskip=0pt, midskip=0pt)[width=0.99\columnwidth]{figures/ablation.pdf}
+{Paired change in acceptance from removing each component. Negative bars mean that the component helps. Error bars are 95 percent intervals.\label{fig:ablation}}
+
+Acceptance during training counts every exploratory proposal as a mistake, so it cannot say whether exploration led to a better policy. We therefore trained each variant on ten videos under three feedback conditions, froze its posterior mean, and scored it on four unseen videos with no corrections. Table~\ref{tab:explore} gives the outcome over 48 runs per cell. Held-out acceptance barely depends on the exploration strategy: every paired difference from Thompson sampling at $v=0.25$ lies within one point, and most intervals include zero. A purely greedy learner ends at 0.932 against 0.936 under normal feedback. The training cost, on the other hand, is large and visible to the creator, with 0.908 for greedy against 0.882 for $v=0.25$ and 0.851 for $v=0.5$.
+
+Why does the usual argument for exploration not apply here? Three reasons stand out. Each video presents fresh contexts, so even a greedy agent sees many feature combinations. A creator's override names the correct arm and updates both arms, so the data are close to full information. And a prior mean already provides an informed start. The simulator does not contain rejections that withhold the right answer, which is the setting where exploration should matter most, so we can only say that exploration has not been shown to help under the feedback we modeled. In the deployed configuration Thompson sampling is kept for two practical reasons: it provides the confidence that orders the review queue, and its stochastic choices give the logged propensities that off-policy evaluation needs. A greedy logger would leave nothing to reweight. A smaller $v$ than ours scores higher on acceptance, but Table~\ref{tab:calib} shows what it gives up.
+
+\begin{table}[t]
+\caption{Exploration Variants: Acceptance During Training and Frozen on Unseen Videos}
+\label{tab:explore}
+\setlength{\tabcolsep}{2.2pt}
+\centering
+\begin{tabular}{|l|cc|cc|cc|}
+\hline
+ & \multicolumn{2}{c|}{Normal} & \multicolumn{2}{c|}{Reluctant} & \multicolumn{2}{c|}{Review 30\%} \\
+Variant & Train & Held & Train & Held & Train & Held \\
+\hline
+Greedy & 0.908 & 0.932 & 0.886 & 0.919 & 0.864 & 0.902 \\
+Thompson, $v=0.05$ & 0.896 & 0.933 & 0.874 & 0.919 & 0.853 & 0.906 \\
+Thompson, $v=0.25$ & 0.882 & 0.936 & 0.855 & 0.922 & 0.839 & 0.906 \\
+Thompson, $v=0.5$ & 0.851 & 0.934 & 0.811 & 0.919 & 0.796 & 0.903 \\
+LinUCB & 0.880 & 0.939 & 0.840 & 0.924 & 0.824 & 0.909 \\
+$\epsilon$-greedy, $\epsilon=0.1$ & 0.859 & 0.935 & 0.831 & 0.911 & 0.817 & 0.906 \\
+\hline
+\multicolumn{7}{p{80mm}}{Reluctant: correction probability 0.2. Held-out intervals are about $\pm$0.01 throughout.}
+\end{tabular}
+\end{table}
+
+\subsection{Sensitivity Analysis}
+Fig.~\ref{fig:sensitivity} varies one hyperparameter at a time over six seeds per persona. Prior strength $\lambda$ has a broad optimum near 2 to 10 late in training. Weak priors ($\lambda=0.5$) lose the cold-start benefit, at 0.821 early, and very strong ones ($\lambda=30$) learn too slowly (0.808 early, 0.883 late). That loss is what the product accepts for keep/cut alone, to prevent one click from causing large changes. Posterior scale $v$ has the largest effect of any parameter: at $v=2$ the agent is little better than a rule (0.692 late), and it improves monotonically down to the smallest value tried ($v=0.05$, 0.917 late). The exploration floor $\epsilon$ behaves in the same way, from 0.908 at 0 to 0.814 at 0.2. Discount $\gamma$ gives 0.920 late at 1.0 and 0.861 at 0.95. The implicit reward has a small effect, with lower values marginally better (0.912 at 0, 0.895 at 1).
+
+The effect of seeds, the last factor, is modest. Late acceptance intervals are about $\pm$0.012 throughout, so differences below two points between settings should not be read as meaningful. In all five panels, what improves stationary acceptance is less randomness and less forgetting, which is the same message as the ablation.
+
+\Figure[t!](topskip=0pt, botskip=0pt, midskip=0pt)[width=\textwidth]{figures/sensitivity.pdf}
+{\parbox[t]{0.91\textwidth}{\raggedright One-at-a-time sensitivity of acceptance on early and late videos. Posterior scale and exploration floor have the largest effects; the others are comparatively flat near their chosen values.}\label{fig:sensitivity}}
+
+\subsection{Robustness and Generalization}
+Robustness asks what happens when the environment gets worse. Fig.~\ref{fig:robust} shows three such stresses. With the label noise raised from 0 to 30 percent, acceptance on videos 8 to 10 falls steadily from 0.925 to 0.748, staying well above Rule (about 0.59). Since the error of the noisy labels sits close to the drop in acceptance, the model is roughly absorbing the noise and not collapsing. A creator who reviews just 10 percent of decisions still leads the agent to 0.829, and 30 percent reaches 0.875, against 0.899 at full review. Reluctance to correct matters little: dropping the correction probability from 1.0 to 0.2 lowers acceptance from 0.912 to 0.887, because accepts still carry information. Video length also has little effect. With 12, 30, and 60 phrases per video (about 67, 160, and 315 decisions), acceptance is 0.894, 0.899, and 0.914, consistent with the idea that learning is measured in decisions rather than videos.
+
+\Figure[t!](topskip=0pt, botskip=0pt, midskip=0pt)[width=\textwidth]{figures/robustness.pdf}
+{\parbox[t]{0.91\textwidth}{\raggedright Acceptance on videos 8 to 10 under (a) wrong feedback labels, (b) smaller review budgets, and (c) reluctance to correct. Degradation is gradual in all three cases.}\label{fig:robust}}
+
+Generalization asks about conditions the model and its prior were not built for. Fig.~\ref{fig:unseen} tests creators who were deliberately placed outside the model family and outside the training data of the prior, scored only on keep/cut, pause, and filler decisions since these personas never zoom. With nonlinear rules, LinTS reaches 0.886, well above Rule (0.509) and the best fixed choice per type (0.489), because binned features can approximate interval rules. With noisy feedback (20 percent wrong labels, 30 percent correction rate), it reaches 0.851, slightly above the best fixed arm at 0.835, and learning is slow and uneven, with an interval of $\pm$0.067. With arbitrary rules that depend on a hash of the unit, it ends at 0.525, below the best fixed arm at 0.570. Here nothing can be learned, and the agent chases noise. That failure is expected and it makes the first two results more credible: the model is not simply winning by construction.
+
+\Figure[t!](topskip=0pt, botskip=0pt, midskip=0pt)[width=\textwidth]{figures/unseen.pdf}
+{\parbox[t]{0.91\textwidth}{\raggedright Creators outside the model family and the prior's training data. The method generalizes to nonlinear and noisy preferences but loses to a constant policy when preferences are arbitrary.}\label{fig:unseen}}
+
+\subsection{Reproducibility}
+Every simulated result can be regenerated from the repository, which contains the simulator, the personas, and the experiment scripts behind each table and figure. A complete rerun of the comparison, ablation, sensitivity, and robustness groups involves about 2500 simulated creators and takes under half an hour on the laptop described above. Seeds are fixed per run. Synthetic videos are deterministic functions of their seed, and all methods compared at a given seed see the same videos, which is what makes the paired comparisons valid. Priors are fitted on separate videos and with the evaluated persona excluded. The real clips cannot be redistributed without the speaker's consent, so the real-audio results can be repeated only with other footage. All reported intervals are 95 percent $t$ intervals across runs, and we state explicitly where a comparison is paired.
+
+\subsection{How Much of This Is Reinforcement Learning?}
+A fair reader may ask whether this is RL or online regression with a user interface, so we address the question directly. Several properties belong to RL and not to supervised learning: the agent acts and observes feedback only on what it proposed, its data depend on its own past actions, it holds an explicit posterior and chooses by sampling from it, it learns online per user under non-stationary preferences, it decides what to ask about, it logs propensities that make counterfactual evaluation possible, and it plans over an episode with a learned reward. A contextual bandit is the one-state special case of an RL problem \cite{sutton2018,lattimore2020}, and our planner is an MDP solved by posterior sampling.
+
+Other properties weaken the claim. Keep/cut and filler decisions are binary, so a rejection reveals the right label, and in those cases the problem is close to online supervised learning. Our own experiments show that exploration does not improve held-out policies under this feedback. Actions affect later states only weakly, through history features that also proved to have little effect. The method is therefore best described as a contextual bandit system with a planning layer, and not as deep or fully sequential RL. We consider that the right tool for the amount of data available, and we think it is more useful to state its boundaries than to use a larger model that could not be justified by a few hundred human signals.
+
+\subsection{Threats to Validity}
+Three threats deserve separate mention. Internal validity is threatened by the fact that the experiments share one code base with the product and were run while that code was still changing. We reran the simulator experiments in one session for this paper, and the scripts in the repository regenerate every table and figure, but the analysis code was still being revised for real audio during that period. Hyperparameters were tuned on the same simulator used for evaluation, which favors the method. The default $v=0.25$ was selected for the quality of its confidences and not for peak acceptance, and lower values score higher on acceptance, so this choice does not inflate the headline figure. We cannot rule out that tuning affected other results.
+
+Construct validity concerns whether acceptance is the right target. A creator might accept a mediocre suggestion simply because correcting takes effort, and in that case acceptance would overstate quality. Our reward distinguishes an explicit accept from an untouched suggestion for this reason, but it cannot see what a person would have preferred had they thought harder. Equally, matching a creator's past decisions is not the same as making a video that audiences enjoy. We optimize the former, as we have no access to the latter.
+
+External validity is the largest threat. Synthetic transcripts contain the mistakes we thought to plant, in the proportions we chose. Their semantic embeddings are random vectors around a topic and not real sentence embeddings, so the near-zero effect of semantic features in the ablation may not carry over to real speech. The result for arbitrary preferences shows that the method can lose when its assumptions fail, and a real population will lie somewhere between our personas and that extreme.
+
+\section{Limitations}
+\label{sec:limitations}
+The most serious limitation is that no human study has been run. Every learning result concerns simulated creators that we designed, using features that we also designed, and our personas' rules are largely expressible in those features. The tests with creators outside the model family push against this, but the acceptance numbers should not be read as predictions for people. Real creators may be less consistent, may tire of reviewing, and may hold preferences that are not functions of these features. The study comparing time-to-post against a simple editor, which is the real test of the product claim, is still future work. Real logs in our database are also too few for off-policy conclusions about real use.
+
+The analysis has been checked on only two clips, one by a real speaker and one with a synthetic voice, against references we wrote, with word-level comparison and no formal listening test. Only English is supported; other languages get a warning, not a usable edit. Whisper's output changed slightly between some full pipeline runs of the same file even though repeated isolated transcriptions were identical, and we did not find the cause. Fillers with no audio dip stay in the edit. Disfluency recovery can miss repeats that the CTC model does not read clearly.
+
+On the RL side, binary keep/cut and filler decisions are close to online supervised learning, particularly because a correction reveals the right label. The bandit layer treats decisions as nearly independent, and the planner's frozen history features remove most of the sequential interaction from its reward. So the sequential part of this work is a length budget, not a rich model of pacing. The planner also does not improve which phrases are chosen. Off-policy estimates are limited by an effective sample size of 15 percent and intervals that under-cover, and the removal of the exploration floor on keep/cut in the product means that actions Thompson sampling never picks have no support in real logs.
+
+Scalability is not a concern for the learner, but analysis takes about as long as the clip on a laptop CPU. There is also a safety aspect, in that a wrong CUT silently deletes content on an autopilot export. Autopilot therefore shows a badge based on expected corrections and a trust score, but we have not validated that badge.
+
+\section{Conclusion and Future Work}
+\label{sec:conclusion}
+This paper treated talking-head editing as online RL from one creator's normal editing behavior, a setting in which rule-based tools cannot adapt and supervised models lack data. We combined a linear Thompson sampling bandit across five decision types with a tempered style posterior for the cold start, an uncertainty-ordered review queue, an exact posterior-sampling planner for length targets, and propensity logging for offline evaluation. In simulation, the method reaches 90.7 percent acceptance by the tenth video against 58.7 percent for a rule baseline, with 72 percent less regret. Learned policies are strongly creator-specific (0.940 against 0.466 across creators), review at a 30 percent budget gives 86.6 percent correct decisions against 63.4 percent in timeline order, and the planner reduces length error from 45.7 to 4.0 percent for 1.2 points of acceptance.
+
+The experiments also set limits on these claims. They establish that structured priors, queueing, and planning add measurable value in the simulator, and that personalization has a large effect there. They do not establish that random exploration is valuable in this domain, since corrections carry enough information for a nearly greedy policy to do well. They do not establish anything yet about real creators.
+
+Future work follows directly. A study with real creators, comparing time-to-post and blind quality ratings against a simple editor, comes first, along with off-policy evaluation on those logs. A larger set of real clips is needed with independent reference edits and listening tests. The keep/cut selection under a length target needs a better reward, possibly through pairwise preference feedback \cite{christiano2017}. History features could return to the planner with uncertainty penalties \cite{yu2020}, now that we know how they fail. Exploration should be restricted to where it is useful, such as multi-arm decisions with rejection-only feedback. Style prototypes could eventually be learned from real users' posteriors rather than written by hand, as in meta-learning approaches \cite{kveton2021meta,cella2020meta}.
+
+\section*{Acknowledgment}
+The authors thank Prof. Geetha M for her guidance. Claude, an AI model from Anthropic, was used to assist with software development and with drafting and editing this manuscript. The authors reviewed the content and take responsibility for it.
+
+\begin{thebibliography}{00}
+
+\bibitem{sutton2018} R. S. Sutton and A. G. Barto, \emph{Reinforcement Learning: An Introduction}, 2nd ed. Cambridge, MA, USA: MIT Press, 2018.
+
+\bibitem{mnih2015} V. Mnih \emph{et al.}, ``Human-level control through deep reinforcement learning,'' \emph{Nature}, vol. 518, no. 7540, pp. 529--533, Feb. 2015, doi: 10.1038/nature14236.
+
+\bibitem{li2010} L. Li, W. Chu, J. Langford, and R. E. Schapire, ``A contextual-bandit approach to personalized news article recommendation,'' in \emph{Proc. 19th Int. Conf. World Wide Web}, Raleigh, NC, USA, 2010, pp. 661--670, doi: 10.1145/1772690.1772758.
+
+\bibitem{zheng2018} G. Zheng \emph{et al.}, ``DRN: A deep reinforcement learning framework for news recommendation,'' in \emph{Proc. World Wide Web Conf.}, Lyon, France, 2018, pp. 167--176, doi: 10.1145/3178876.3185994.
+
+\bibitem{chen2019} M. Chen, A. Beutel, P. Covington, S. Jain, F. Belletti, and E. H. Chi, ``Top-K off-policy correction for a REINFORCE recommender system,'' in \emph{Proc. 12th ACM Int. Conf. Web Search Data Mining}, Melbourne, VIC, Australia, 2019, pp. 456--464, doi: 10.1145/3289600.3290999.
+
+\bibitem{hu2018exposure} Y. Hu, H. He, C. Xu, B. Wang, and S. Lin, ``Exposure: A white-box photo post-processing framework,'' \emph{ACM Trans. Graph.}, vol. 37, no. 2, pp. 1--17, Apr. 2018, doi: 10.1145/3181974.
+
+\bibitem{christiano2017} P. F. Christiano, J. Leike, T. B. Brown, M. Martic, S. Legg, and D. Amodei, ``Deep reinforcement learning from human preferences,'' in \emph{Proc. Adv. Neural Inf. Process. Syst.}, vol. 30, 2017, pp. 4299--4307.
+
+\bibitem{ouyang2022} L. Ouyang \emph{et al.}, ``Training language models to follow instructions with human feedback,'' in \emph{Proc. Adv. Neural Inf. Process. Syst.}, vol. 35, 2022, pp. 27730--27744.
+
+\bibitem{berthouzoz2012} F. Berthouzoz, W. Li, and M. Agrawala, ``Tools for placing cuts and transitions in interview video,'' \emph{ACM Trans. Graph.}, vol. 31, no. 4, pp. 1--8, Jul. 2012, doi: 10.1145/2185520.2185563.
+
+\bibitem{rubin2013} S. Rubin, F. Berthouzoz, G. J. Mysore, W. Li, and M. Agrawala, ``Content-based tools for editing audio stories,'' in \emph{Proc. 26th ACM Symp. User Interface Softw. Technol.}, St. Andrews, U.K., 2013, pp. 113--122, doi: 10.1145/2501988.2501993.
+
+\bibitem{huber2019} B. Huber, H. V. Shin, B. Russell, O. Wang, and G. J. Mysore, ``B-Script: Transcript-based B-roll video editing with recommendations,'' in \emph{Proc. CHI Conf. Hum. Factors Comput. Syst.}, Glasgow, U.K., 2019, pp. 1--11, doi: 10.1145/3290605.3300311.
+
+\bibitem{chu2011} W. Chu, L. Li, L. Reyzin, and R. E. Schapire, ``Contextual bandits with linear payoff functions,'' in \emph{Proc. 14th Int. Conf. Artif. Intell. Statist.}, Fort Lauderdale, FL, USA, 2011, pp. 208--214.
+
+\bibitem{schulman2017} J. Schulman, F. Wolski, P. Dhariwal, A. Radford, and O. Klimov, ``Proximal policy optimization algorithms,'' 2017, \emph{arXiv:1707.06347}.
+
+\bibitem{shin2016} H. V. Shin, W. Li, and F. Durand, ``Dynamic authoring of audio with linked scripts,'' in \emph{Proc. 29th Annu. Symp. User Interface Softw. Technol.}, Tokyo, Japan, 2016, pp. 509--516, doi: 10.1145/2984511.2984561.
+
+\bibitem{truong2016} A. Truong, F. Berthouzoz, W. Li, and M. Agrawala, ``QuickCut: An interactive tool for editing narrated video,'' in \emph{Proc. 29th Annu. Symp. User Interface Softw. Technol.}, Tokyo, Japan, 2016, pp. 497--507, doi: 10.1145/2984511.2984569.
+
+\bibitem{pavel2014} A. Pavel, C. Reed, B. Hartmann, and M. Agrawala, ``Video digests: A browsable, skimmable format for informational lecture videos,'' in \emph{Proc. 27th Annu. ACM Symp. User Interface Softw. Technol.}, Honolulu, HI, USA, 2014, pp. 573--582, doi: 10.1145/2642918.2647400.
+
+\bibitem{leake2017} M. Leake, A. Davis, A. Truong, and M. Agrawala, ``Computational video editing for dialogue-driven scenes,'' \emph{ACM Trans. Graph.}, vol. 36, no. 4, pp. 1--14, Jul. 2017, doi: 10.1145/3072959.3073653.
+
+\bibitem{fried2019} O. Fried \emph{et al.}, ``Text-based editing of talking-head video,'' \emph{ACM Trans. Graph.}, vol. 38, no. 4, pp. 1--14, Jul. 2019, doi: 10.1145/3306346.3323028.
+
+\bibitem{wang2024lave} B. Wang, Y. Li, Z. Lv, H. Xia, Y. Xu, and R. Sodhi, ``LAVE: LLM-powered agent assistance and language augmentation for video editing,'' in \emph{Proc. 29th Int. Conf. Intell. User Interfaces}, Greenville, SC, USA, 2024, pp. 699--714, doi: 10.1145/3640543.3645143.
+
+\bibitem{huh2025videodiff} M. Huh, D. Li, K. Pimmel, H. V. Shin, A. Pavel, and M. Dontcheva, ``VideoDiff: Human-AI video co-creation with alternatives,'' in \emph{Proc. CHI Conf. Hum. Factors Comput. Syst.}, Yokohama, Japan, 2025, pp. 1--19, doi: 10.1145/3706598.3713417.
+
+\bibitem{wang2019write} M. Wang, G.-W. Yang, S.-M. Hu, S.-T. Yau, and A. Shamir, ``Write-A-Video: Computational video montage from themed text,'' \emph{ACM Trans. Graph.}, vol. 38, no. 6, pp. 1--13, Nov. 2019, doi: 10.1145/3355089.3356520.
+
+\bibitem{zhou2018summarization} K. Zhou, Y. Qiao, and T. Xiang, ``Deep reinforcement learning for unsupervised video summarization with diversity-representativeness reward,'' in \emph{Proc. AAAI Conf. Artif. Intell.}, vol. 32, no. 1, 2018, doi: 10.1609/aaai.v32i1.12255.
+
+\bibitem{hu2023rlediting} P. Hu, N. Xiao, F. Li, Y. Chen, and R. Huang, ``A reinforcement learning-based automatic video editing method using pre-trained vision-language model,'' in \emph{Proc. 31st ACM Int. Conf. Multimedia}, Ottawa, ON, Canada, 2023, pp. 6441--6450, doi: 10.1145/3581783.3611878.
+
+\bibitem{thompson1933} W. R. Thompson, ``On the likelihood that one unknown probability exceeds another in view of the evidence of two samples,'' \emph{Biometrika}, vol. 25, nos. 3--4, pp. 285--294, Dec. 1933, doi: 10.2307/2332286.
+
+\bibitem{kaufmann2012} E. Kaufmann, N. Korda, and R. Munos, ``Thompson sampling: An asymptotically optimal finite-time analysis,'' in \emph{Proc. Int. Conf. Algorithmic Learn. Theory}, Lyon, France, 2012, pp. 199--213, doi: 10.1007/978-3-642-34106-9\_18.
+
+\bibitem{agrawal2013} S. Agrawal and N. Goyal, ``Thompson sampling for contextual bandits with linear payoffs,'' in \emph{Proc. 30th Int. Conf. Mach. Learn.}, Atlanta, GA, USA, 2013, pp. 127--135.
+
+\bibitem{abeille2017} M. Abeille and A. Lazaric, ``Linear Thompson sampling revisited,'' \emph{Electron. J. Statist.}, vol. 11, no. 2, pp. 5165--5197, 2017, doi: 10.1214/17-EJS1341SI.
+
+\bibitem{russo2018} D. J. Russo, B. Van Roy, A. Kazerouni, I. Osband, and Z. Wen, ``A tutorial on Thompson sampling,'' \emph{Found. Trends Mach. Learn.}, vol. 11, no. 1, pp. 1--96, 2018, doi: 10.1561/2200000070.
+
+\bibitem{riquelme2018} C. Riquelme, G. Tucker, and J. Snoek, ``Deep Bayesian bandits showdown: An empirical comparison of Bayesian deep networks for Thompson sampling,'' in \emph{Proc. Int. Conf. Learn. Represent.}, Vancouver, BC, Canada, 2018.
+
+\bibitem{bouneffouf2020} D. Bouneffouf, I. Rish, and C. Aggarwal, ``Survey on applications of multi-armed and contextual bandits,'' in \emph{Proc. IEEE Congr. Evol. Comput.}, Glasgow, U.K., 2020, pp. 1--8, doi: 10.1109/CEC48606.2020.9185782.
+
+\bibitem{lattimore2020} T. Lattimore and C. Szepesv\'{a}ri, \emph{Bandit Algorithms}. Cambridge, U.K.: Cambridge Univ. Press, 2020, doi: 10.1017/9781108571401.
+
+\bibitem{russac2019} Y. Russac, C. Vernade, and O. Capp\'{e}, ``Weighted linear bandits for non-stationary environments,'' in \emph{Proc. Adv. Neural Inf. Process. Syst.}, vol. 32, 2019.
+
+\bibitem{kveton2021meta} B. Kveton \emph{et al.}, ``Meta-Thompson sampling,'' in \emph{Proc. 38th Int. Conf. Mach. Learn.}, 2021, pp. 5884--5893.
+
+\bibitem{cella2020meta} L. Cella, A. Lazaric, and M. Pontil, ``Meta-learning with stochastic linear bandits,'' in \emph{Proc. 37th Int. Conf. Mach. Learn.}, 2020, pp. 1360--1370.
+
+\bibitem{hong2020latent} J. Hong, B. Kveton, M. Zaheer, Y. Chow, A. Ahmed, and C. Boutilier, ``Latent bandits revisited,'' in \emph{Proc. Adv. Neural Inf. Process. Syst.}, vol. 33, 2020, pp. 13423--13433.
+
+\bibitem{knox2009} W. B. Knox and P. Stone, ``Interactively shaping agents via human reinforcement: The TAMER framework,'' in \emph{Proc. 5th Int. Conf. Knowl. Capture}, Redondo Beach, CA, USA, 2009, pp. 9--16, doi: 10.1145/1597735.1597738.
+
+\bibitem{macglashan2017} J. MacGlashan \emph{et al.}, ``Interactive learning from policy-dependent human feedback,'' in \emph{Proc. 34th Int. Conf. Mach. Learn.}, Sydney, NSW, Australia, 2017, pp. 2285--2294.
+
+\bibitem{hu2008} Y. Hu, Y. Koren, and C. Volinsky, ``Collaborative filtering for implicit feedback datasets,'' in \emph{Proc. 8th IEEE Int. Conf. Data Mining}, Pisa, Italy, 2008, pp. 263--272, doi: 10.1109/ICDM.2008.22.
+
+\bibitem{settles2012} B. Settles, \emph{Active Learning} (Synthesis Lectures on Artificial Intelligence and Machine Learning). Cham, Switzerland: Springer, 2012, doi: 10.1007/978-3-031-01560-1.
+
+\bibitem{osband2013} I. Osband, D. Russo, and B. Van Roy, ``(More) efficient reinforcement learning via posterior sampling,'' in \emph{Proc. Adv. Neural Inf. Process. Syst.}, vol. 26, 2013, pp. 3003--3011.
+
+\bibitem{janner2019} M. Janner, J. Fu, M. Zhang, and S. Levine, ``When to trust your model: Model-based policy optimization,'' in \emph{Proc. Adv. Neural Inf. Process. Syst.}, vol. 32, 2019, pp. 12498--12509.
+
+\bibitem{yu2020} T. Yu \emph{et al.}, ``MOPO: Model-based offline policy optimization,'' in \emph{Proc. Adv. Neural Inf. Process. Syst.}, vol. 33, 2020, pp. 14129--14142.
+
+\bibitem{altman1999} E. Altman, \emph{Constrained Markov Decision Processes}. Boca Raton, FL, USA: Chapman \& Hall/CRC, 1999.
+
+\bibitem{li2011} L. Li, W. Chu, J. Langford, and X. Wang, ``Unbiased offline evaluation of contextual-bandit-based news article recommendation algorithms,'' in \emph{Proc. 4th ACM Int. Conf. Web Search Data Mining}, Hong Kong, 2011, pp. 297--306, doi: 10.1145/1935826.1935878.
+
+\bibitem{saito2021} Y. Saito and T. Joachims, ``Counterfactual learning and evaluation for recommender systems: Foundations, implementations, and recent advances,'' in \emph{Proc. 15th ACM Conf. Recommender Syst.}, Amsterdam, The Netherlands, 2021, pp. 828--830, doi: 10.1145/3460231.3473320.
+
+\bibitem{horvitz1952} D. G. Horvitz and D. J. Thompson, ``A generalization of sampling without replacement from a finite universe,'' \emph{J. Amer. Statist. Assoc.}, vol. 47, no. 260, pp. 663--685, Dec. 1952, doi: 10.1080/01621459.1952.10483446.
+
+\bibitem{swaminathan2015} A. Swaminathan and T. Joachims, ``The self-normalized estimator for counterfactual learning,'' in \emph{Proc. Adv. Neural Inf. Process. Syst.}, vol. 28, 2015, pp. 3231--3239.
+
+\bibitem{dudik2011} M. Dud\'{i}k, J. Langford, and L. Li, ``Doubly robust policy evaluation and learning,'' in \emph{Proc. 28th Int. Conf. Mach. Learn.}, Bellevue, WA, USA, 2011, pp. 1097--1104.
+
+\bibitem{swaminathan2017} A. Swaminathan \emph{et al.}, ``Off-policy evaluation for slate recommendation,'' in \emph{Proc. Adv. Neural Inf. Process. Syst.}, vol. 30, 2017, pp. 3632--3642.
+
+\bibitem{hadad2021} V. Hadad, D. A. Hirshberg, R. Zhan, S. Wager, and S. Athey, ``Confidence intervals for policy evaluation in adaptive experiments,'' \emph{Proc. Nat. Acad. Sci. USA}, vol. 118, no. 15, 2021, Art. no. e2014602118, doi: 10.1073/pnas.2014602118.
+
+\bibitem{cameron2008} A. C. Cameron, J. B. Gelbach, and D. L. Miller, ``Bootstrap-based improvements for inference with clustered errors,'' \emph{Rev. Econ. Statist.}, vol. 90, no. 3, pp. 414--427, Aug. 2008, doi: 10.1162/rest.90.3.414.
+
+\bibitem{radford2023} A. Radford, J. W. Kim, T. Xu, G. Brockman, C. McLeavey, and I. Sutskever, ``Robust speech recognition via large-scale weak supervision,'' in \emph{Proc. 40th Int. Conf. Mach. Learn.}, Honolulu, HI, USA, 2023, pp. 28492--28518.
+
+\bibitem{smith2025} G. Smith, D. Yee, J. K. Chen, and L. Findlater, ``Prompting Whisper for improved verbatim transcription and end-to-end miscue detection,'' in \emph{Proc. Interspeech}, Rotterdam, The Netherlands, 2025, pp. 1943--1947, doi: 10.21437/Interspeech.2025-1031.
+
+\bibitem{baevski2020} A. Baevski, H. Zhou, A. Mohamed, and M. Auli, ``wav2vec 2.0: A framework for self-supervised learning of speech representations,'' in \emph{Proc. Adv. Neural Inf. Process. Syst.}, vol. 33, 2020, pp. 12449--12460.
+
+\bibitem{graves2006} A. Graves, S. Fern\'{a}ndez, F. Gomez, and J. Schmidhuber, ``Connectionist temporal classification: Labelling unsegmented sequence data with recurrent neural networks,'' in \emph{Proc. 23rd Int. Conf. Mach. Learn.}, Pittsburgh, PA, USA, 2006, pp. 369--376, doi: 10.1145/1143844.1143891.
+
+\bibitem{bain2023} M. Bain, J. Huh, T. Han, and A. Zisserman, ``WhisperX: Time-accurate speech transcription of long-form audio,'' in \emph{Proc. Interspeech}, Dublin, Ireland, 2023, pp. 4489--4493, doi: 10.21437/Interspeech.2023-78.
+
+\bibitem{zayats2016} V. Zayats, M. Ostendorf, and H. Hajishirzi, ``Disfluency detection using a bidirectional LSTM,'' in \emph{Proc. Interspeech}, San Francisco, CA, USA, 2016, pp. 2523--2527, doi: 10.21437/Interspeech.2016-1247.
+
+\bibitem{honnibal2014} M. Honnibal and M. Johnson, ``Joint incremental disfluency detection and dependency parsing,'' \emph{Trans. Assoc. Comput. Linguistics}, vol. 2, pp. 131--142, 2014, doi: 10.1162/tacl\_a\_00171.
+
+\bibitem{lou2020} P. J. Lou and M. Johnson, ``End-to-end speech recognition and disfluency removal,'' in \emph{Proc. Findings Assoc. Comput. Linguistics: EMNLP}, 2020, pp. 2051--2061, doi: 10.18653/v1/2020.findings-emnlp.186.
+
+\bibitem{reimers2019} N. Reimers and I. Gurevych, ``Sentence-BERT: Sentence embeddings using Siamese BERT-networks,'' in \emph{Proc. Conf. Empirical Methods Natural Lang. Process.}, Hong Kong, 2019, pp. 3980--3990, doi: 10.18653/v1/D19-1410.
+
+\bibitem{wu2023yunet} W. Wu, H. Peng, and S. Yu, ``YuNet: A tiny millisecond-level face detector,'' \emph{Mach. Intell. Res.}, vol. 20, no. 5, pp. 656--665, Oct. 2023, doi: 10.1007/s11633-023-1423-y.
+
+\end{thebibliography}
+
+\EOD
+
+\end{document}

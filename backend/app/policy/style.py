@@ -24,6 +24,7 @@ POOLED = "pooled"
 IDENTIFIED_ABOVE = 0.8  # PLAN Phase 6: "Snappy is identified (> 0.8) within ~30 decisions"
 SHOW_FROM = 0.10  # a style below this share is not worth a mention
 SHOW_AT_MOST = 2
+MIN_EVENTS_FOR_SHARES = 8  # below this the posterior is sharp but rests on a few clicks: name a leaning, no numbers
 
 # display name and one line of what the style means, for the profile page (names are the persona / prototype keys)
 STYLES: dict[str, tuple[str, str]] = {
@@ -111,5 +112,7 @@ def summarize(weights: dict[str, float], n_events: int) -> StyleSummary:
     identified = bool(named) and named[0][1] > IDENTIFIED_ABOVE
     if not shown or top is None:
         return StyleSummary("Your style so far: not clear yet, still learning.", None, False, [])
+    if n_events < MIN_EVENTS_FOR_SHARES:
+        return StyleSummary(f"Your style so far: early guess, leaning {style_label(top)}.", top, False, shown)
     text = "Your style so far: " + " · ".join(f"{round(100 * w)}% {style_label(n)}" for n, w in shown)
     return StyleSummary(text, top, identified, shown)

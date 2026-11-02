@@ -8,6 +8,7 @@ from sqlmodel import select
 
 from app.models import SuggestionRow, UnitRow, Video, WordRow
 from app.policy import context
+from app.svc.bundle import NEEDS_EYE_CAP
 from tests.apihelpers import make_client, new_ready_project, upload, wait_ready
 
 
@@ -71,6 +72,21 @@ def test_create_project_validation(client, kwargs):
              ("files", ("b.mp4", io.BytesIO(b"y" * 10), "video/mp4"))]
     data = {"user_id": str(uid), "type": "vlog", **kwargs}
     assert client.post("/api/projects", files=files, data=data).status_code == 422
+
+
+def test_too_long_a_video_is_refused_at_upload_with_a_clear_message(client, ctx, monkeypatch):
+    from types import SimpleNamespace
+
+    from app.models import Video as V
+    from app.svc import projects as pj
+
+    uid = client.post("/api/users", json={"name": "Ana"}).json()["id"]
+    monkeypatch.setattr(pj, "probe", lambda _p: SimpleNamespace(duration=400.0))
+    r = client.post("/api/projects", files=[("files", ("long.mp4", io.BytesIO(b"x"), "video/mp4"))],
+                    data={"user_id": str(uid), "type": "vlog"})
+    assert r.status_code == 422 and "6:40" in r.json()["detail"] and "5 minutes" in r.json()["detail"]
+    with ctx.session() as s:
+        assert s.exec(select(V)).all() == []  # no failed project left behind
 
 
 def test_create_project_rejects_bad_uploads(client, ctx):
@@ -186,7 +202,11 @@ def test_suggest_creates_decisions_for_every_type_and_is_idempotent(client, ctx)
     assert sorted(s["queue"]["needs_review"] + s["queue"]["confident"]) == ids
     conf = {x["id"]: x["confidence"] for x in s["suggestions"]}
     nr = [conf[i] for i in s["queue"]["needs_review"]]
-    assert all(c < 0.7 for c in nr) and nr == sorted(nr) and all(conf[i] >= 0.7 for i in s["queue"]["confident"])
+    kind = {x["id"]: x["decision_type"] for x in s["suggestions"]}
+    assert all(c < 0.7 for c in nr) and nr == sorted(nr)
+    # the spot-check list is the confident ones, plus cosmetic decisions beyond their cap in "needs your eye"
+    assert all(conf[i] >= 0.7 or kind[i] in NEEDS_EYE_CAP for i in s["queue"]["confident"])
+    assert sum(kind[i] == "emphasis" for i in s["queue"]["needs_review"]) <= NEEDS_EYE_CAP["emphasis"]
     assert s["style_mixture"]["n_events"] == 0 and abs(sum(s["style_mixture"]["weights"].values()) - 1) < 1e-9
     again = client.post(f"/api/projects/{pk}/suggest").json()
     assert sorted(x["id"] for x in again["suggestions"]) == ids  # not regenerated

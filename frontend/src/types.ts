@@ -1,14 +1,17 @@
 // Mirror of backend/app/schemas.py (FROZEN CONTRACT). Keep in sync; checked by backend/tests/test_schema_sync.py.
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export type VideoType = "tutorial" | "vlog" | "opinion" | "other";
-export type DecisionType = "phrase" | "pause" | "zoom" | "filler" | "emphasis" | "hook";
+export type DecisionType = "phrase" | "pause" | "zoom" | "filler" | "emphasis" | "hook" | "rhythm" | "pace" | "music_timing";
 export type UnitKind = "speech" | "pause" | "filler";
 
 export const PHRASE_ACTIONS = ["KEEP", "CUT"] as const;
 export const PAUSE_ACTIONS = ["KEEP", "TIGHT_40", "TIGHT_15", "REMOVE"] as const;
 export const ZOOM_ACTIONS = ["NONE", "Z115", "Z130"] as const;
 export const FILLER_ACTIONS = ["KEEP", "REMOVE"] as const;
+export const RHYTHM_ACTIONS = ["NONE", "Z115", "Z130", "TEXT_POP", "SFX"] as const;
+export const PACE_ACTIONS = ["S100", "S110", "S125"] as const;
+export const MUSIC_TIMING_ACTIONS = ["FROM_START", "AFTER_INTRO"] as const;
 
 export interface Word {
   id: number;
@@ -62,6 +65,7 @@ export interface Clip {
   zoom: number;
   crop_center: Point;
   unit_ids: number[];
+  speed?: number;
 }
 
 export interface CaptionWord {
@@ -98,12 +102,19 @@ export interface MusicSpec {
   track_id: string;
   gain_db: number;
   duck_db: number;
+  start_s?: number;
+}
+
+export interface SfxCue {
+  t0: number;
+  name: string;
 }
 
 export interface AudioSpec {
   enhance: boolean;
   target_lufs: number;
   music: MusicSpec | null;
+  sfx?: SfxCue[];
 }
 
 export interface EDL {
@@ -137,7 +148,7 @@ export interface Suggestion {
 
 export type EventKind =
   | "accept" | "reject" | "override" | "implicit"
-  | "fine_cut" | "crop" | "caption_text" | "text_overlay" | "music" | "speed" | "nudge" | "setting";
+  | "fine_cut" | "crop" | "caption_text" | "text_overlay" | "music" | "speed" | "nudge" | "setting" | "rating";
 
 export interface AppEvent {
   id: number | null;

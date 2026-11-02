@@ -1,7 +1,7 @@
 """Linear contextual bandits (PLAN 7.1): LinTS (ours), LinUCB, epsilon-greedy, and the never-updated Global baseline.
 
 Sufficient statistics are split into prior and data, so the prior can be swapped without touching the data:
-    prior:      A0 = lam * I,  b0 = lam * theta_prior
+    prior:      A0 = lam * I,  b0 = lam * theta_prior     (lam may differ per decision type, see LinearPolicy)
     data:       A_d <- gamma * A_d + w x x^T ;  b_d <- gamma * b_d + w r x
     posterior:  A = A0 + A_d ;  theta_hat = A^-1 (b0 + b_d) ;  Sigma = v^2 A^-1
 
@@ -82,18 +82,24 @@ class LinearPolicy(Policy):
     """Shared storage + posterior queries; subclasses implement `choose`."""
 
     def __init__(self, prior: Prior | None = None, lam: float = LAMBDA, gamma: float = GAMMA,
-                 seed: int | None = None):
+                 seed: int | None = None, lam_by_type: dict[str, float] | None = None):
         super().__init__(seed)
         self.prior = prior or Prior()
         self.lam, self.gamma = lam, gamma
+        # a stronger prior for some decision types: a wrongly generalised CUT deletes content, while a wrongly
+        # generalised pause or zoom is cosmetic, so keep/cut may be made slower to move than the rest
+        self.lam_by_type = dict(lam_by_type or {})
         self.models: dict[tuple[str, str], Ridge] = {}
 
     # -- storage
+    def lam_of(self, decision_type: str) -> float:
+        return self.lam_by_type.get(decision_type, self.lam)
+
     def _model(self, decision_type: str, arm: str) -> Ridge:
         k = key_of(decision_type, arm)
         m = self.models.get(k)
         if m is None:
-            m = self.models[k] = Ridge(context.dim(decision_type), self.lam, self.gamma,
+            m = self.models[k] = Ridge(context.dim(decision_type), self.lam_of(decision_type), self.gamma,
                                        self.prior.theta(decision_type, arm))
         return m
 
@@ -169,7 +175,7 @@ class LinearPolicy(Policy):
         self.models = {}
         for k, v in state["models"].items():
             dt, arm = k.split("|", 1)
-            m = Ridge(context.dim(dt), self.lam, self.gamma, self.prior.theta(dt, arm))
+            m = Ridge(context.dim(dt), self.lam_of(dt), self.gamma, self.prior.theta(dt, arm))
             m.A_d, m.b_d, m.n = np.array(v["A_d"], dtype=float), np.array(v["b_d"], dtype=float), int(v["n"])
             self.models[(dt, arm)] = m
 
@@ -180,13 +186,20 @@ class LinTS(LinearPolicy):
     name = "linTS"
 
     def __init__(self, prior: Prior | None = None, lam: float = LAMBDA, v: float = V, gamma: float = GAMMA,
-                 eps_floor: float = EPS_FLOOR, n_draws: int = N_DRAWS, seed: int | None = None):
-        super().__init__(prior, lam, gamma, seed)
+                 eps_floor: float = EPS_FLOOR, n_draws: int = N_DRAWS, seed: int | None = None,
+                 lam_by_type: dict[str, float] | None = None, eps_by_type: dict[str, float] | None = None):
+        super().__init__(prior, lam, gamma, seed, lam_by_type)
         self.v, self.eps_floor, self.n_draws = v, eps_floor, n_draws
+        # safe exploration: a uniform random pick on keep/cut deletes a real sentence, so the product turns it off
+        # there; Thompson sampling still explores wherever the posterior is genuinely unsure
+        self.eps_by_type = dict(eps_by_type or {})
+
+    def eps_of(self, decision_type: str) -> float:
+        return self.eps_by_type.get(decision_type, self.eps_floor)
 
     def choose(self, decision_type: str, ctx: dict[str, float],
                offsets: dict[str, float] | None = None) -> Choice:
-        M, eps = self.n_draws, self.eps_floor
+        M, eps = self.n_draws, self.eps_of(decision_type)
         if decision_type == "emphasis":
             arms, X, m = self._shared(decision_type, ctx)
             mu = X @ m.theta + self._offset_vec(arms, offsets)

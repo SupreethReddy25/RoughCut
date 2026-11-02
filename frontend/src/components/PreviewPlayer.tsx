@@ -61,7 +61,7 @@ export const PreviewPlayer = forwardRef<PlayerHandle, Props>(function PreviewPla
   const dragStart = useRef<{ px: number; py: number; cx: number; cy: number; rect: Rect; frameH: number } | null>(null);
 
   const remap = useMemo(
-    () => new Remap(edl.clips.map((c): [number, number] => [c.src_start, c.src_end]), edl.output.speed),
+    () => new Remap(edl.clips.map((c): [number, number] => [c.src_start, c.src_end]), edl.output.speed, edl.clips.map((c) => c.speed ?? 1)),
     [edl.clips, edl.output.speed],
   );
   const pb = useRef(new Playback(remap));
@@ -135,6 +135,8 @@ export const PreviewPlayer = forwardRef<PlayerHandle, Props>(function PreviewPla
           clipRef.current = res.clip;
           setClipIdx(res.clip);
         }
+        const rate = pb.current.remap.speed * (pb.current.remap.paces[Math.max(res.clip, 0)] ?? 1);
+        if (Math.abs(v.playbackRate - rate) > 1e-3) v.playbackRate = rate; // each clip has its own pace
         const src = v.currentTime;
         if (!v.paused) {
           if (res.jumped || lastSrc < 0 || src < lastSrc || src - lastSrc > 0.5) collect(src, src);
@@ -159,7 +161,7 @@ export const PreviewPlayer = forwardRef<PlayerHandle, Props>(function PreviewPla
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
-    v.playbackRate = edl.output.speed;
+    v.playbackRate = edl.output.speed * (edl.clips[Math.max(clipRef.current, 0)]?.speed ?? 1);
     if (v.paused && remap.ranges.length > 0) {
       const k = pb.current.seekSrc(v, v.currentTime);
       clipRef.current = k;

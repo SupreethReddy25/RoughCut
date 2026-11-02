@@ -100,8 +100,33 @@ def segment_speech(words: list[Word], take_bounds: list[float] = (), *, split_ga
             spans[a:b + 1] = [(spans[a][0], spans[b][1])]
             changed = True
             break
-    # 4: cap length
+    # 4: cap length, 5: split at restarts inside a unit (so the abandoned start is a unit of its own)
     out: list[tuple[int, int]] = []
     for s in spans:
-        out += _split_long(words, s, max_len)
+        for p in _split_long(words, s, max_len):
+            out += _split_restarts(words, p)
     return out
+
+
+RESTART_LOOKBACK = 6  # words: a restart repeats something said at most this many words earlier
+RESTART_GAP = 0.12  # s of silence before the repeat that marks it as a restart (when there is no comma/dash)
+
+
+def _key(w: Word) -> str:
+    return re.sub(r"[^\w']", "", w.text_original.lower().replace("’", "'"))
+
+
+def _split_restarts(words: list[Word], s: tuple[int, int]) -> list[tuple[int, int]]:
+    """Split before word i when words[i:i+2] repeats words[p:p+2] (p a few words back) and the speaker broke off
+    right before i (a comma/dash or a short silence): "you'll also be the, | you'll also be learning ...".
+    Repeats without a break ("how to X and how to Y") are lists, not restarts, and stay whole."""
+    i0, i1 = s
+    for i in range(i0 + 2, i1 - 1):
+        prev = words[i - 1]
+        broke = prev.text_original.endswith((",", "-", "—", "…")) or words[i].start - prev.end >= RESTART_GAP
+        if not broke or not _key(words[i]) or not _key(words[i + 1]):
+            continue
+        for p in range(max(i0, i - RESTART_LOOKBACK), i - 1):
+            if _key(words[p]) == _key(words[i]) and _key(words[p + 1]) == _key(words[i + 1]):
+                return [(i0, i)] + _split_restarts(words, (i, i1))
+    return [s]

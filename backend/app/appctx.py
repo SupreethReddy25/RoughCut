@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -32,11 +33,31 @@ from app.schemas import UnitsFile
 # (prior sigma 3 instead of 0.7) so it does not collapse onto one prototype after a single event. The displayed
 # posterior stays sharp (policy/style.py). Simulator accuracy is unchanged.
 PRODUCT_LAMBDA = 10.0
+# ... and a stronger one for keep/cut: phrase contexts share most of their features, so with lam=10 ONE rejected KEEP
+# made a fresh user's next video cut 65 % of its phrases (simulator, 6 personas x 10 seeds). lam=30 on phrases only:
+# 8 %, for a small cost in held-out acceptance after 4 videos (0.898 vs 0.902). A wrong CUT deletes content; a wrong
+# pause or zoom is cosmetic, so only keep/cut is slowed down.
+PRODUCT_LAMBDA_BY_TYPE = {"phrase": 30.0}
+PRODUCT_EPS_BY_TYPE = {"phrase": 0.0}  # no uniform random keep/cut flips in the product (policy/linear.py)
+PRODUCT_V = 0.15  # less posterior noise and fewer random tries: 0.903 vs 0.892 on unseen seeds, same recovery from drift
+PRODUCT_EPS = 0.005
 STYLE_SIGMA = 0.7  # the style posterior itself (PLAN 7.2): sharp, so a style is identified quickly
 STYLE_PRIOR_SIGMA = 3.0  # ... but the prior mean the bandit starts from follows it softly (see policy/style.py)
 
 log = logging.getLogger(__name__)
 IngestFn = Callable[[list[Path], str, str, Path], UnitsFile]
+
+
+def preload_models() -> None:
+    """Load the analysis models in the background at startup (the first upload would otherwise wait for them)."""
+    from app.pipeline import align, semantic, transcribe
+
+    try:
+        transcribe.preload()
+        align.preload()
+        semantic.preload()
+    except Exception:
+        log.warning("could not preload the analysis models; they load with the first upload", exc_info=True)
 
 
 def default_ingest(inputs: list[Path], video_id: str, video_type: str, out_dir: Path) -> UnitsFile:
@@ -55,7 +76,7 @@ def _config_key(shipped) -> str:
     import hashlib
     import json
 
-    h = hashlib.sha1(f"{PRODUCT_LAMBDA}|{STYLE_SIGMA}|{STYLE_PRIOR_SIGMA}".encode())
+    h = hashlib.sha1(f"{PRODUCT_LAMBDA}|{sorted(PRODUCT_LAMBDA_BY_TYPE.items())}|{sorted(PRODUCT_EPS_BY_TYPE.items())}|{STYLE_SIGMA}|{STYLE_PRIOR_SIGMA}".encode())
     if shipped is not None:
         generic, protos = shipped
         h.update(json.dumps([generic.to_dict(), {k: p.to_dict() for k, p in sorted(protos.items())}],
@@ -84,8 +105,10 @@ class PolicyManager:
         if shipped is not None:
             generic, protos = shipped
             mixture = StyleMixture(protos, generic, sigma=STYLE_SIGMA, prior_sigma=STYLE_PRIOR_SIGMA)
-            return Learner(LinTS(mixture.mean_prior(), lam=PRODUCT_LAMBDA, seed=user_id), mixture)
-        return Learner(LinTS(Prior(), lam=PRODUCT_LAMBDA, seed=user_id), None)
+            return Learner(LinTS(mixture.mean_prior(), lam=PRODUCT_LAMBDA, v=PRODUCT_V, eps_floor=PRODUCT_EPS, seed=user_id,
+                                 lam_by_type=PRODUCT_LAMBDA_BY_TYPE, eps_by_type=PRODUCT_EPS_BY_TYPE), mixture)
+        return Learner(LinTS(Prior(), lam=PRODUCT_LAMBDA, v=PRODUCT_V, eps_floor=PRODUCT_EPS, seed=user_id,
+                             lam_by_type=PRODUCT_LAMBDA_BY_TYPE, eps_by_type=PRODUCT_EPS_BY_TYPE), None)
 
     @staticmethod
     def fingerprint(session: Session, user_id: int) -> tuple[int, int]:
@@ -163,7 +186,7 @@ class PolicyManager:
 
 
 class AppContext:
-    def __init__(self, data_dir: str | Path | None = None, ingest_fn: IngestFn | None = None, workers: int = 2,
+    def __init__(self, data_dir: str | Path | None = None, ingest_fn: IngestFn | None = None, agents: bool | None = None, workers: int = 2,
                  shipped_priors="auto"):
         self.data_dir = Path(data_dir) if data_dir else config.DATA_DIR
         self.processed_dir = self.data_dir / "processed"
@@ -175,6 +198,9 @@ class AppContext:
         self.jobs = JobRunner(workers)
         self.locks = LockMap()
         self.ingest_fn = ingest_fn or default_ingest
+        self.agents = agents if agents is not None else os.environ.get("ROUGHCUT_AGENTS", "1") != "0"
+        if ingest_fn is None and config.PRELOAD_MODELS:
+            threading.Thread(target=preload_models, name="preload-models", daemon=True).start()
         self.shipped_priors = load_shipped_priors() if shipped_priors == "auto" else shipped_priors
         self._analysis: dict[int, Analysis] = {}
         self._analysis_guard = threading.Lock()

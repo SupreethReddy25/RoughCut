@@ -32,7 +32,7 @@ class ManualEditIn(BaseModel):
 
 class EventIn(BaseModel):
     kind: Literal["accept", "reject", "override", "manual", "nudge", "crop", "caption_text", "text_overlay", "speed",
-                  "setting", "music"]
+                  "setting", "music", "rating"]
     suggestion_id: int | None = None
     final_action: str | None = None
     edit: ManualEditIn | None = None
@@ -59,6 +59,7 @@ class SuggestionOut(BaseModel):
     current_action: str
     candidates: list[str]
     candidate_word_ids: list[int]
+    candidate_texts: list[str] = Field(default_factory=list)  # hook: the text of each candidate
     confidence: float
     propensity: float
     explored: bool
@@ -144,6 +145,8 @@ class ProjectOut(ProjectSummary, StateOut):
     exports: dict
     job: dict | None = None
     source: dict  # {"width", "height"} of source.mp4 (for the preview's crop maths)
+    progress: dict | None = None  # while analysing: stages, fraction done, seconds left (svc/progress.py)
+    rating: int | None = None  # the creator's verdict on this video at export (-1, 0, 1)
 
 
 class ProfileOut(BaseModel):

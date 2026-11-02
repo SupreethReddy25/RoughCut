@@ -21,7 +21,14 @@ STOPWORDS = frozenset([
     "having", "not", "no", "nor", "than", "then", "too", "very", "can", "could", "would", "should",
     "will", "just", "about", "into", "out", "up", "down", "over", "also", "more", "most", "some", "any",
     "each", "other", "such", "only", "own", "same", "s", "t", "don't", "i'm", "it's", "that's",
+    "how", "why", "when", "where", "while", "because", "like", "get", "got", "let", "let's", "much", "many", "really",
+    "you'll", "you're", "you've", "we'll", "we're", "we've", "i'll", "i've", "i'd", "they're", "what's", "there's",
+    "going", "gonna", "want", "okay", "ok", "yeah", "well", "see", "know",
 ])
+
+
+def preload() -> None:
+    embed_texts(["warm up"])
 
 
 def embed_texts(texts: list[str]) -> np.ndarray:

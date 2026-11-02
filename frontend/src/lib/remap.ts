@@ -19,18 +19,21 @@ export class Remap {
   readonly starts: number[];
   readonly offsets: number[]; // pre-speed output offset of each range
   readonly total: number;
+  readonly paces: number[];
 
   constructor(
     readonly ranges: Range[],
     readonly speed = 1,
+    paces?: number[],
   ) {
+    this.paces = paces && paces.length === ranges.length ? paces : ranges.map(() => 1);
     this.starts = ranges.map((r) => r[0]);
     let acc = 0;
     this.offsets = [];
-    for (const [a, b] of ranges) {
+    ranges.forEach(([a, b], i) => {
       this.offsets.push(acc);
-      acc += b - a;
-    }
+      acc += (b - a) / this.paces[i];
+    });
     this.total = acc;
   }
 
@@ -54,10 +57,10 @@ export class Remap {
     const k = this.locate(t);
     if (k !== null) {
       const [a, b] = this.ranges[k];
-      return (this.offsets[k] + (Math.min(Math.max(t, a), b) - a)) / this.speed;
+      return (this.offsets[k] + (Math.min(Math.max(t, a), b) - a) / this.paces[k]) / this.speed;
     }
     const j = bisectRight(this.starts, t); // first range starting after t
-    const prevEnd = j > 0 ? this.offsets[j - 1] + (this.ranges[j - 1][1] - this.ranges[j - 1][0]) : 0;
+    const prevEnd = j > 0 ? this.offsets[j - 1] + (this.ranges[j - 1][1] - this.ranges[j - 1][0]) / this.paces[j - 1] : 0;
     const nextStart = j < this.ranges.length ? this.offsets[j] : this.total;
     let out: number;
     if (snap === "next") out = nextStart;
@@ -76,6 +79,6 @@ export class Remap {
     const x = Math.min(Math.max(o * this.speed, 0), this.total);
     const k = Math.max(0, bisectRight(this.offsets, x + EPS) - 1);
     const [a, b] = this.ranges[k];
-    return Math.min(a + (x - this.offsets[k]), b);
+    return Math.min(a + (x - this.offsets[k]) * this.paces[k], b);
   }
 }

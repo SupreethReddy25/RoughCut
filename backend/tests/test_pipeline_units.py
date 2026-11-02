@@ -5,7 +5,7 @@ import numpy as np
 
 from app.pipeline import fillers as fl
 from app.pipeline import pauses, segment
-from app.pipeline.features import build_units, content_tokens, retake_scores
+from app.pipeline.features import build_units, content_tokens, false_start_scores, retake_scores
 from app.pipeline.pauses import Energy, build_pause_spans, energy_from_samples, refine_word_edges
 from app.schemas import UnitsFile, Word
 
@@ -155,8 +155,9 @@ def test_filler_so_only_at_discourse_position():
 
 
 def test_like_verb_vs_filler_and_you_know_clause():
-    _, g = find("I like pizza")
-    assert [(x.token, x.likely_verb_like) for x in g] == [("like", True)]
+    assert find("I like pizza")[1] == []
+    assert find("what it looks like to edit")[1] == []
+    assert find("we create it like the other")[1] == []
     _, g = find("it was like really big")
     assert [(x.token, x.likely_verb_like) for x in g] == [("like", False)]
     _, g = find("do you know the answer")
@@ -203,6 +204,78 @@ def test_retake_needs_content_and_window():
     assert earlier[0] == 1
 
 
+def test_list_items_sharing_words_are_not_retakes():
+    # "how to remove the gaps" / "how to remove the green screen" share words but are both real content
+    score, earlier = retake_scores([toks("inside the video, how to remove the gaps"),
+                                    toks("inside the video, how to color grade and remove this green screen")])
+    assert earlier[0] == 0 and score[0] < 0.85
+
+
+def test_retake_window_skips_tiny_fragments():
+    p = ["learning about the difference between green screen and", "you'll", "also be", "the",
+         "learning the difference between green screen and blue screen"]
+    _, earlier = retake_scores([toks(x) for x in p])
+    assert earlier[0] == 1
+
+
+def _false_starts(phrases: list[str], gap: float = 0.5):
+    ws = chain(*[(p, gap if i else 0.0) for i, p in enumerate(phrases)])
+    spans, i = [], 0
+    for p in phrases:
+        spans.append((i, i + len(p.split())))
+        i += len(p.split())
+    norm = [[segment._key(w) for w in ws[a:b]] for a, b in spans]
+    return false_start_scores(norm, [ws[a].start for a, _ in spans], [ws[b - 1].end for _, b in spans],
+                              [segment.is_sentence_end(ws[b - 1].text_original) for _, b in spans],
+                              [content_tokens(ws[a:b]) for a, b in spans])
+
+
+def test_false_starts_made_of_function_words_are_found():
+    s = _false_starts(["You'll also be,", "also be,", "you'll also be the,",
+                       "you'll also be learning the difference between green and blue screen."])
+    assert all(x >= 0.8 for x in s[:3]) and s[3] < 0.8
+
+
+def test_false_start_needs_a_longer_restart_soon_and_no_sentence_end():
+    assert _false_starts(["this is", "this is how we edit videos"])[0] >= 0.8
+    assert _false_starts(["The second tip.", "The second tip is to use a dark background."])[0] >= 0.8
+    assert _false_starts(["Bye now.", "Bye now."])[0] < 0.8  # the same short line twice: not a restart
+    assert _false_starts(["this is", "this is how we edit videos"], gap=6.0)[0] < 0.8  # too far apart
+    assert _false_starts(["step one open the app", "step two open the menu and pick a song"])[0] < 0.8
+
+
+def test_best_take_keeps_a_clean_first_delivery_over_a_worse_repeat():
+    ws = chain(("Lighting matters more than the camera you use.", 0.0),
+               ("Lighting matters, um, more than the, uh, camera you use.", 0.9))
+    fl.find_fillers(ws, [(0, 8), (8, 18)])
+    uf, _ = build_units(ws, [(0, 8), (8, 18)], [], [], video_id="t", duration=ws[-1].end + 1)
+    sp = [u for u in uf.units if u.kind == "speech"]
+    assert sp[0].features["is_earlier_take"] == 0 and sp[1].features["is_earlier_take"] == 1
+
+
+def test_best_take_is_normally_the_repeat():
+    ws = chain(("Lighting matters, um, more than the camera you use.", 0.0),
+               ("Lighting matters more than the camera you use.", 0.9))
+    fl.find_fillers(ws, [(0, 9), (9, 17)])
+    uf, _ = build_units(ws, [(0, 9), (9, 17)], [], [], video_id="t", duration=ws[-1].end + 1)
+    sp = [u for u in uf.units if u.kind == "speech"]
+    assert sp[0].features["is_earlier_take"] == 1 and sp[1].features["is_earlier_take"] == 0
+
+
+def test_hedges_openers_and_stutters_are_fillers():
+    _, g = find("Well, I I think it is kind of hard")
+    assert [x.token for x in g] == ["other", "uh", "other"]
+    _, g = find("what kind of camera do you use")
+    assert g == []
+
+
+def test_split_at_restart_inside_a_phrase():
+    w = seq("you'll also be the, you'll also be learning the difference")
+    assert texts(w, segment.segment_speech(w)) == ["you'll also be the,", "you'll also be learning the difference"]
+    w = seq("how to color grade and how to remove this green screen")  # a list, no break: stays whole
+    assert len(segment.segment_speech(w)) == 1
+
+
 # ---------------------------------------------------------------- assembly
 def test_build_units_structure_and_schema():
     w = chain(("um so this is take one", 0.0), ("and then the second take starts here", 1.9))
@@ -228,3 +301,61 @@ def test_build_units_structure_and_schema():
     assert all(x.unit_id in (sp0.id, sp1.id) for x in uf.words) and len(uf.words) == len(w)
     assert all(np.isfinite(v) for u in uf.units for v in u.features.values())
     assert set(wf[0]) >= {"is_number", "tfidf_in_transcript", "word_loudness_z", "is_negation"}
+
+
+def test_keywords_exclude_question_words_and_contractions():
+    assert toks("how you'll learn editing") == ["learn", "editing"]
+
+
+def test_language_warning(tmp_path):
+    import json
+
+    from app.svc.projects import language_warning
+
+    class Ctx:
+        def video_dir(self, pk):
+            return tmp_path
+
+    (tmp_path / "transcript.json").write_text(json.dumps({"detected_language": "te", "detected_language_prob": 0.97}))
+    assert "not in English" in language_warning(Ctx(), 1)
+    (tmp_path / "transcript.json").write_text(json.dumps({"detected_language": "te", "detected_language_prob": 0.4}))
+    assert language_warning(Ctx(), 1) is None  # accented English can look like this: no false alarm
+    (tmp_path / "transcript.json").write_text(json.dumps({"detected_language": "en", "detected_language_prob": 0.9}))
+    assert language_warning(Ctx(), 1) is None
+
+
+def _energy_with_dip(dip_at: float, n: int = 100, floor: float = -20.0, dip: float = -50.0):
+    from app.pipeline.pauses import Energy
+
+    db = np.full(n, floor)
+    db[int(round(dip_at / 0.02))] = dip
+    return Energy(10 ** (db / 20), db, 0.02, -40.0, -60.0, -20.0)
+
+
+def _w(i, text, start, end):
+    return Word(id=i, idx=i, unit_id=-1, start=start, end=end, text_original=text, text_display=text, conf=1.0)
+
+
+def test_filler_with_no_gap_is_cuttable_only_at_a_dip():
+    words = [_w(0, "that", 0.4, 0.6), _w(1, "basically", 0.6, 1.0), _w(2, "works", 1.0, 1.4)]
+    g = fl.FillerGroup([1], "basically", 0)
+    assert fl.clean_gap(words, g)[2] is False  # no audio to look at: the old conservative rule
+    assert fl.clean_gap(words, g, _energy_with_dip(0.6))[2] is False  # a dip at one side is not enough
+    from app.pipeline.pauses import Energy
+
+    db = np.full(100, -20.0)
+    db[30], db[50] = -50.0, -50.0
+    both = Energy(10 ** (db / 20), db, 0.02, -40.0, -60.0, -20.0)
+    assert fl.clean_gap(words, g, both)[2] is True
+
+
+def test_boundary_snaps_onto_a_nearby_dip():
+    words = [_w(0, "that", 0.2, 0.6), _w(1, "basically", 0.6, 1.0), _w(2, "works", 1.0, 1.4)]
+    fl.snap_to_valleys(words, [fl.FillerGroup([1], "basically", 0)], _energy_with_dip(0.66))
+    assert words[0].end == words[1].start and abs(words[1].start - 0.67) < 0.02
+    assert words[1].end == 1.0  # no dip there: untouched
+
+
+def test_stutter_boundary_is_always_cuttable():
+    words = [_w(0, "I", 0.2, 0.4), _w(1, "I", 0.4, 0.6), _w(2, "think", 0.8, 1.0)]
+    assert fl.clean_gap(words, fl.FillerGroup([0], "uh", 0))[2] is True

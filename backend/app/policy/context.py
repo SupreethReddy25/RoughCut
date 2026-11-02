@@ -19,7 +19,16 @@ import numpy as np
 
 from app.pipeline import fillers as fl
 from app.pipeline.semantic import STOPWORDS
-from app.schemas import FILLER_ACTIONS, PAUSE_ACTIONS, PHRASE_ACTIONS, ZOOM_ACTIONS, Word
+from app.schemas import (
+    FILLER_ACTIONS,
+    MUSIC_TIMING_ACTIONS,
+    PACE_ACTIONS,
+    PAUSE_ACTIONS,
+    PHRASE_ACTIONS,
+    RHYTHM_ACTIONS,
+    ZOOM_ACTIONS,
+    Word,
+)
 
 CONTEXT_VERSION = 1
 VIDEO_TYPES = ("tutorial", "vlog", "opinion", "other")
@@ -29,7 +38,12 @@ ARMS: dict[str, list[str]] = {
     "pause": list(PAUSE_ACTIONS),
     "zoom": list(ZOOM_ACTIONS),
     "filler": list(FILLER_ACTIONS),
+    "rhythm": list(RHYTHM_ACTIONS),
+    "pace": list(PACE_ACTIONS),
+    "music_timing": list(MUSIC_TIMING_ACTIONS),
 }
+# decided by their own agents (app/rl), so the bandit neither models nor updates them
+AGENT_TYPES = ("rhythm", "hook")
 MAX_CANDIDATES = 3
 EMPHASIS_ARMS = ["NONE"] + [f"CAND_{k}" for k in range(MAX_CANDIDATES)]
 ZOOM_NEVER = 30.0  # hist_since_last_zoom before the first zoom (seconds)
@@ -67,6 +81,12 @@ SPECS: dict[str, list[tuple]] = {
         ("lin", "token_duration", 0.5), ("lin", "gap_before", 1.0), ("lin", "gap_after", 1.0),
         ("lin", "word_conf", 1.0), ("lin", "likely_verb_like", 1.0), ("lin", "loudness_z", 3.0),
     ] + _TYPE,
+    "pace": [
+        ("lin", "speech_rate", 5.0), ("lin", "duration", 6.0), ("lin", "loudness_z", 3.0), ("lin", "filler_ratio", 1.0),
+        ("lin", "topic_centrality", 1.0), ("lin", "is_first", 1.0), ("lin", "position", 1.0),
+        ("bin", "speech_rate", (2.0, 3.0, 4.0)),
+    ] + _TYPE,
+    "music_timing": [("lin", "video_minutes", 3.0), ("lin", "first_sentence_seconds", 10.0)] + _TYPE,
 }
 
 # D5: per-candidate block and the NONE-arm block (all live in one shared space)
@@ -132,6 +152,8 @@ def arms_for(decision_type: str, ctx: dict[str, float] | None = None) -> list[st
     if decision_type == "emphasis":
         n = int((ctx or {}).get("n_cand", 0))
         return EMPHASIS_ARMS[: 1 + n]
+    if decision_type == "hook":
+        return [f"CAND_{k}" for k in range(int((ctx or {}).get("n_cand", 0)))] + ["NONE"]
     return ARMS[decision_type]
 
 

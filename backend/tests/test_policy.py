@@ -242,8 +242,12 @@ def _small_run(keep_log=True, mixture=False, algo=LinTS, seed=3, n_videos=3):
 
 
 def _same_state(a: Policy, b: Policy):
-    assert a.n_updates == b.n_updates and set(a.models) == set(b.models)
+    # scoring an arm creates its model lazily (prior only, no data), so only models that hold data must match
+    assert a.n_updates == b.n_updates
+    assert {k for k, m in a.models.items() if m.n} == {k for k, m in b.models.items() if m.n}
     for k, m in a.models.items():
+        if not m.n:
+            continue
         assert np.array_equal(m.A_d, b.models[k].A_d) and np.array_equal(m.b_d, b.models[k].b_d) and m.n == b.models[k].n
         assert np.array_equal(m.theta, b.models[k].theta)
 
@@ -420,3 +424,16 @@ def test_style_mixture_counts_user_events_not_updates():
     assert lr.policy.n_updates == 2 and lr.mixture.n_events == 1
     lr.apply("pause", {"gap_seconds": 1.0}, "KEEP", "crop")  # not a learning event
     assert lr.mixture.n_events == 1
+
+
+def test_safe_exploration_never_flips_a_confident_keep_at_random():
+    from app.policy.prior import Prior
+
+    ctx = {"bias": 1.0, "duration": 2.0}
+    th = {("phrase", "KEEP"): np.zeros(context.dim("phrase")), ("phrase", "CUT"): np.zeros(context.dim("phrase"))}
+    i = context.feature_names("phrase").index("bias")
+    th[("phrase", "KEEP")][i], th[("phrase", "CUT")][i] = 5.0, -5.0
+    safe = LinTS(Prior(th), lam=1000.0, seed=1, eps_by_type={"phrase": 0.0})
+    assert all(safe.choose("phrase", ctx).action == "KEEP" for _ in range(600))
+    plain = LinTS(Prior(th), lam=1000.0, seed=1)
+    assert any(plain.choose("phrase", ctx).action == "CUT" for _ in range(600))  # the default floor explores

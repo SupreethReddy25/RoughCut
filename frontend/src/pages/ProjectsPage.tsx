@@ -15,12 +15,21 @@ const LABEL: Record<ProjectSummary["status"], string> = {
 };
 
 const BADGE: Record<ProjectSummary["status"], string> = {
-  uploaded: "bg-neutral-500/30 text-neutral-200",
-  processing: "bg-amber-500/25 text-amber-200",
-  ready: "bg-sky-500/25 text-sky-200",
-  edited: "bg-violet-500/25 text-violet-200",
-  exported: "bg-emerald-500/25 text-emerald-200",
-  failed: "bg-red-500/25 text-red-200",
+  uploaded: "bg-neutral-950/70 text-neutral-200",
+  processing: "bg-neutral-950/70 text-amber-200",
+  ready: "bg-neutral-950/70 text-sky-200",
+  edited: "bg-neutral-950/70 text-fuchsia-200",
+  exported: "bg-neutral-950/70 text-emerald-200",
+  failed: "bg-neutral-950/70 text-red-200",
+};
+
+const DOT: Record<ProjectSummary["status"], string> = {
+  uploaded: "bg-neutral-400",
+  processing: "bg-amber-400 animate-pulse",
+  ready: "bg-sky-400",
+  edited: "bg-fuchsia-400",
+  exported: "bg-emerald-400",
+  failed: "bg-red-400",
 };
 
 const POLL_MS = 3000;
@@ -157,53 +166,87 @@ export default function ProjectsPage() {
   }, [analysing, userId]);
 
   return (
-    <div className="mx-auto max-w-5xl p-6">
-      <div className="mb-4 flex items-center">
-        <h1 className="text-2xl font-semibold">Projects</h1>
-        <Link to="/upload" className="ml-auto rounded bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-500">
-          + New project
+    <div className="mx-auto max-w-6xl px-6 py-8">
+      <div className="mb-6 flex items-end gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Projects</h1>
+          <p className="mt-1 text-sm text-neutral-400">
+            {projects && projects.length > 0
+              ? `${projects.length} video${projects.length === 1 ? "" : "s"} · open one to review the first cut`
+              : "Upload a talking-head clip and get a first cut in about a minute."}
+          </p>
+        </div>
+        <Link to="/upload" className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-sky-900/40 hover:bg-sky-500">
+          <span aria-hidden="true" className="text-base leading-none">+</span> New project
         </Link>
       </div>
       {error && (
-        <p role="alert" className="mb-3 rounded bg-red-500/20 p-2 text-sm text-red-200">
+        <p role="alert" className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-sm text-red-200">
           {error}
         </p>
       )}
-      {projects === null && !error && <p className="text-neutral-400">Loading…</p>}
-      {projects?.length === 0 && (
-        <p className="rounded-lg border border-dashed border-white/20 p-10 text-center text-neutral-400">
-          No projects yet. Upload a talking-head clip to get a first cut to review.
-        </p>
+      {projects === null && !error && (
+        <ul className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3" aria-hidden="true">
+          {[0, 1, 2].map((k) => (
+            <li key={k} className="rc-panel overflow-hidden">
+              <div className="relative aspect-video overflow-hidden bg-white/[0.03]">
+                <div className="rc-shimmer absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-white/[0.05] to-transparent" />
+              </div>
+              <div className="space-y-2 p-4">
+                <div className="h-3 w-2/3 rounded bg-white/[0.06]" />
+                <div className="h-2.5 w-1/3 rounded bg-white/[0.04]" />
+              </div>
+            </li>
+          ))}
+        </ul>
       )}
-      <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {projects?.map((p) => (
-          <li key={p.id} className="overflow-hidden rounded-xl border border-white/10 bg-neutral-900 hover:border-sky-400/60">
+      {projects?.length === 0 && (
+        <div className="rc-panel flex flex-col items-center px-6 py-16 text-center">
+          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-sky-500/10 text-xl text-sky-300 ring-1 ring-sky-400/20">▶</div>
+          <p className="max-w-sm text-neutral-300">No projects yet. Upload a talking-head clip to get a first cut to review.</p>
+          <Link to="/upload" className="mt-5 rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-500">
+            Upload a video
+          </Link>
+        </div>
+      )}
+      <ul className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        {projects?.map((p, i) => (
+          <li key={p.id} style={{ animationDelay: `${Math.min(i, 8) * 60}ms` }} className="group rc-panel rc-in overflow-hidden transition-[translate,border-color,box-shadow] duration-200 hover:-translate-y-0.5 hover:border-sky-400/40 hover:shadow-2xl hover:shadow-sky-950/50">
             <Link to={`/projects/${p.id}`} className="block">
-              <div className="flex aspect-video items-center justify-center bg-black">
+              <div className="relative flex aspect-video items-center justify-center overflow-hidden bg-neutral-900">
                 {p.has_thumbnail ? (
-                  <img src={thumbnailUrl(p.id)} alt="" className="h-full w-full object-cover" loading="lazy" />
+                  <img src={thumbnailUrl(p.id)} alt="" className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]" loading="lazy" />
                 ) : (
                   <span className="text-xs text-neutral-500">no preview yet</span>
                 )}
+                <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-neutral-950/80 via-transparent to-transparent" />
+                {!(p.autopilot && p.status === "ready") && (
+                  <span className={`absolute left-2.5 top-2.5 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-white/10 backdrop-blur ${BADGE[p.status]}`}>
+                    <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${DOT[p.status]}`} />
+                    {LABEL[p.status]}
+                  </span>
+                )}
+                {p.duration > 0 && (
+                  <span className="absolute bottom-2.5 right-2.5 rounded-md bg-neutral-950/75 px-1.5 py-0.5 font-mono text-[11px] text-neutral-200 ring-1 ring-white/10 backdrop-blur">
+                    {fmtDuration(p.duration)}
+                  </span>
+                )}
               </div>
-              <div className="p-3">
-                <div className="flex items-center gap-2">
-                  <h2 className="min-w-0 flex-1 truncate font-medium" title={p.title}>
-                    {p.title || p.video_id}
-                  </h2>
-                  {!(p.autopilot && p.status === "ready") && (
-                    <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] ${BADGE[p.status]}`}>{LABEL[p.status]}</span>
-                  )}
-                </div>
-                <p className="mt-1 text-xs text-neutral-400">
-                  {p.video_type} · {p.duration > 0 ? fmtDuration(p.duration) : "—"}
-                  {p.target_duration ? ` · target ${p.target_duration}s` : ""}
+              <div className="px-4 py-3">
+                <h2 className="truncate font-medium text-neutral-100" title={p.title}>
+                  {p.title || p.video_id}
+                </h2>
+                <p className="mt-1 flex items-center gap-1.5 text-xs text-neutral-400">
+                  <span className="capitalize">{p.video_type}</span>
+                  {p.target_duration ? (
+                    <span className="rounded-full bg-sky-500/10 px-1.5 py-px text-[10.5px] text-sky-300 ring-1 ring-sky-400/20">target {p.target_duration}s</span>
+                  ) : null}
                 </p>
                 {p.status === "failed" && p.error && <p className="mt-1 truncate text-xs text-red-300" title={p.error}>{p.error}</p>}
               </div>
             </Link>
             {p.autopilot && (p.status === "ready" || p.status === "exported") && (
-              <div className="flex items-center gap-2 border-t border-white/10 px-3 py-2" data-testid={`autopilot-${p.id}`}>
+              <div className="flex items-center gap-2 border-t border-white/[0.06] px-4 py-2.5" data-testid={`autopilot-${p.id}`}>
                 {p.status === "exported" && <Downloads id={p.id} />}
                 <AutopilotBadge p={p} />
                 {p.badge === "ready" && <QuickExport p={p} onDone={reloadList} />}
