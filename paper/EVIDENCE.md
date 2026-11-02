@@ -1,6 +1,6 @@
 # Evidence for the paper
 
-All numbers come from the final code. Regenerate them with `powershell -ExecutionPolicy Bypass -File paper\scripts\run_all.ps1`. `main.tex` is built from `main_base.tex` by `scripts/build_tex.py`, which fills in these results. After editing `main.tex` by hand, do not run that script again, or the edits are lost.
+All numbers come from the final code. Regenerate them with `powershell -ExecutionPolicy Bypass -File paper\scripts\run_all.ps1`. `main.tex` was built from `main_base.tex` by `scripts/build_tex.py`, then updated by hand and by `scripts/final_patch.py`. Do not run `build_tex.py` again, or the final results are lost. `scripts/final_checks.py` and `scripts/final_summary.py` produce the final comparison.
 
 ## Where each result lives
 
@@ -36,7 +36,10 @@ Simulated creators unless stated. CI = 95% confidence interval half-width.
 | E11 RLSVI minus bandit | matches −0.018 (CI 0.019, p = 0.055); rating +0.003 (CI 0.071, p = 0.93) |
 | Final vs earlier bandit settings, 120 fresh runs, video 6 | 0.903 vs 0.892 (+0.011, CI 0.005) |
 | Drift with final settings, 6 videos after the switch | 0.829 vs 0.814 (+0.015, CI 0.013, n = 20) |
-| Neural bandit, 60 runs, same seeds as the other baselines | blank: 0.897 at video 10, regret 225.3; pretrained: 0.896, regret 217.8; proposed: 0.910, regret 181.5 |
+| Fair comparison (`final_summary.json`, `final_numbers.json`), 60 runs, tuned on seeds 201-203 | video 10 / regret 10 / regret 50: retuned 0.931, 152.7, 590.9; default 0.910, 181.5, 713.3; Neural pretrained 0.921, 167.8, 618.8; Neural blank 0.915, 186.7, 642.9 |
+| Retuned on seeds 301-320 | +0.015 (CI 0.005) at video 10, 30.8 fewer wrong proposals; AUC 0.831 vs 0.893, ECE 0.052 vs 0.023 |
+| Outside the model, 30 videos | nonlinear LinTS 0.931 / Neural 0.948; noisy 0.953 / 0.880; arbitrary 0.508 / 0.511; fixed 0.479, 0.836, 0.559 |
+| Rhythm, rating only, video 16 | RLSVI match 0.336, rating +0.16; bandit 0.515, -0.32 |
 | Tuned deep agents on rhythm (`deep_numbers.json`) | DQN 0.855 blank, 0.865 warm; PPO 0.532 blank, 0.542 warm; ratings +0.04, +0.03, −0.25, −0.11 |
 | Cost | RLSVI 145 parameters, 16 ms to prepare a video after 10 videos, 0.08 ms per decision; planner about 186 ms per video |
 
@@ -58,5 +61,5 @@ Analysis times were measured while the test suite ran, so they overstate an idle
 - **The Whisper isolation is a workaround.** Inside a process that had prepared footage, identical audio gave a different transcript (305 vs 324 words on A-Roll). Running Whisper in a fresh process fixed it. The internal cause was not found.
 - **RLSVI does not beat the bandit.** Report it as a finding, and note that these personas react to state the bandit also sees.
 - **E10.** LinTS is below the best fixed arm on noisy and arbitrary creators.
-- **Audio has not been reviewed by ear.**
+- **No formal listening test.** The authors ran the editor on the clips informally during development.
 - **Settings used in experiments.** E1–E10 use the experiments' default settings unless stated; the product uses stronger priors and less exploration.
